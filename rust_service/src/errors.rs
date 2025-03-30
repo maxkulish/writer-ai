@@ -21,6 +21,8 @@ pub enum AppError {
     Io(#[from] std::io::Error),
     #[error("Missing configuration directory")]
     MissingConfigDir,
+    #[error("Could not determine home directory")]
+    MissingHomeDir,
     #[error("Internal Server Error: {0}")]
     Internal(String),
 }
@@ -35,6 +37,7 @@ impl IntoResponse for AppError {
             AppError::LlmApiError(msg) => (StatusCode::BAD_GATEWAY, msg.clone()),
             AppError::Io(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("IO error: {}", e)),
             AppError::MissingConfigDir => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
+            AppError::MissingHomeDir => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
         };
         error!("Error processing request: {}", error_message);

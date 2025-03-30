@@ -18,8 +18,10 @@ pub struct AppConfig {
 
 // --- Configuration Loading ---
 pub fn find_config_path() -> Result<PathBuf, AppError> {
-    let config_dir_base = dirs::config_dir().ok_or(AppError::MissingConfigDir)?;
-    Ok(config_dir_base.join("writer_ai_service"))
+    // Only use ~/.config/writer_ai_service as the config directory
+    let mut config_path = dirs::home_dir().ok_or(AppError::MissingHomeDir)?;
+    config_path.push(".config/writer_ai_service");
+    Ok(config_path)
 }
 
 pub fn load_config() -> Result<AppConfig, AppError> {

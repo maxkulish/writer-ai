@@ -88,7 +88,86 @@ cargo run --release
 ./target/release/writer_ai_rust_service
 ```
 
+### Running as a Service with launchd (macOS)
+
+1. Create a launchd plist file in your LaunchAgents directory:
+
+```bash
+# Create the plist file
+touch ~/Library/LaunchAgents/com.user.writer_ai_rust_service.plist
+```
+
+2. Edit the plist file with the following content (replace the path with your actual binary path):
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.user.writer_ai_rust_service</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/your_username/path/to/writer_ai_rust_service/target/release/writer_ai_rust_service</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/writer_ai_rust_service.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/writer_ai_rust_service.err</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>RUST_LOG</key>
+        <string>writer_ai_rust_service=info,warn</string>
+    </dict>
+</dict>
+</plist>
+```
+
+3. Load the service:
+
+```bash
+launchctl load ~/Library/LaunchAgents/com.user.writer_ai_rust_service.plist
+```
+
 The service will start on the configured port (default: 8989).
+
+## Updating and Restarting the Service
+
+When you update the configuration or the application:
+
+1. Edit your configuration file at `~/.config/writer_ai_service/config.toml`
+
+2. Unload and reload the service:
+
+```bash
+# Unload the service
+launchctl unload ~/Library/LaunchAgents/com.user.writer_ai_rust_service.plist
+
+# Reload the service
+launchctl load ~/Library/LaunchAgents/com.user.writer_ai_rust_service.plist
+```
+
+3. Check the logs to verify the service restarted correctly:
+
+```bash
+tail -f /tmp/writer_ai_rust_service.log /tmp/writer_ai_rust_service.err
+```
+
+For quick model changes without editing the config file, use environment variables:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.user.writer_ai_rust_service.plist
+WRITER_AI_SERVICE__MODEL_NAME=different-model launchctl load ~/Library/LaunchAgents/com.user.writer_ai_rust_service.plist
+```
 
 ## API Usage
 
