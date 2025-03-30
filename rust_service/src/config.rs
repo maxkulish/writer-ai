@@ -70,6 +70,7 @@ model_name = "{}"
 #[llm_params]
 #stream = false
 #temperature = 0.7
+#keep_alive = "30m" # Keep model loaded in memory for 30 minutes
 "#,
             app_config.port, app_config.llm_url, app_config.model_name
         );
