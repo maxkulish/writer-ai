@@ -63,7 +63,7 @@ reload:
 	launchctl load $(LAUNCH_AGENT_FILE)
 	@echo "Service restarted"
 
-test:
+test-api:
 	@echo "Running tests..."
 	curl -X POST http://localhost:8989/process -H "Content-Type: application/json" -d '{"text":"My English is no such god. Howe ar you?"}'
 
