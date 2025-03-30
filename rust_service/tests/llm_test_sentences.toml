@@ -1,0 +1,12 @@
+sentences = [
+    "My English is no such god. Howe ar you?",
+    "Weather here change alot. I not used it.",
+    "I am interesting in learn more about rust programing.",
+    "The cat sat on the mat and it was very fluffy.",
+    "Runing is good for health, you should do it everyday.",
+    "He go to store yesterday for buy milk.",
+    "They is going to the park later.",
+    "She have a dog and two cats.",
+    "We are learn Rust now.",
+    "This is a sentence with some extra words words that should be removed."
+]

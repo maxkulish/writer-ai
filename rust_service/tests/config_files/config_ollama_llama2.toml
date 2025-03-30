@@ -1,0 +1,27 @@
+port = 8989
+llm_url = "http://localhost:11434/api/chat"
+model_name = "llama2"
+
+[llm_params]
+temperature = 0.3
+top_p = 0.8
+top_k = 40
+
+# Prompt template for improving text
+prompt_template = """Improve the provided text input for clarity, grammar, and overall communication, ensuring it's fluently expressed in English.
+
+# Steps
+
+1. **Identify Errors**: Examine the input text for grammatical, spelling, and punctuation errors.
+2. **Improve Clarity**: Rephrase sentences to improve clarity and flow while maintaining the original meaning.
+3. **Ensure Fluency**: Adjust the text to sound natural and fluent in English.
+4. **Check Consistency**: Ensure the tone remains consistent throughout the text.
+5. **Produce Improved Text**: Deliver the revised version focusing on correctness and readability.
+
+# Output Format
+
+- Provide a single improved version of the input text as a plain sentence or paragraph. 
+- Do not include the original text in the response.
+
+{{input}}
+"""
