@@ -39,83 +39,125 @@ async fn main() -> Result<(), AppError> {
         .build()?;
     let shared_client = Arc::new(http_client.clone());
     
-    // Test OpenAI API connectivity on startup
-    info!("Testing connection to OpenAI API");
+    // Test LLM API connectivity on startup based on the configured LLM provider
+    let is_ollama = shared_config.llm_url.contains("ollama") || shared_config.llm_url.contains("localhost:11434");
     
-    // Verify API key is configured
-    match &shared_config.openai_api_key {
-        Some(api_key) if !api_key.is_empty() => {
-            // Only show masking for actual keys, not empty ones
-            if api_key.len() > 8 {
-                let masked_key = format!("{}...{}", &api_key[..4], &api_key[api_key.len()-4..]);
-                info!("✅ OpenAI API key is configured: {}", masked_key);
-            } else {
-                info!("✅ OpenAI API key is configured");
-            }
-            
-            // Log org ID if present
-            if let Some(org_id) = &shared_config.openai_org_id {
-                if !org_id.is_empty() {
-                    info!("✅ Using OpenAI Organization ID: {}", org_id);
+    if is_ollama {
+        // Ollama doesn't require API key
+        info!("Testing connection to Ollama API");
+        info!("Using Ollama endpoint: {}", shared_config.llm_url);
+        info!("Using model: {}", shared_config.model_name);
+        
+        // Test connection to Ollama API using the list models endpoint
+        let test_url = if shared_config.llm_url.ends_with("/chat") {
+            shared_config.llm_url.replace("/chat", "/models")
+        } else {
+            "http://localhost:11434/api/models".to_string()
+        };
+        
+        info!("Testing Ollama API connectivity...");
+        match http_client.get(&test_url).timeout(std::time::Duration::from_secs(5)).send().await {
+            Ok(resp) => {
+                if resp.status().is_success() {
+                    info!("✅ Successfully connected to Ollama API");
+                    let model_name = &shared_config.model_name;
+                    info!("Using model: {}", model_name);
+                } else {
+                    warn!("⚠️ Ollama API responded with status code: {}", resp.status());
+                    match resp.text().await {
+                        Ok(body) => warn!("Response body: {}", body),
+                        Err(_) => warn!("Could not read error response body"),
+                    }
+                }
+            },
+            Err(e) => {
+                warn!("⚠️ Failed to connect to Ollama API: {}", e);
+                if e.is_timeout() {
+                    warn!("Connection timed out - Ollama may not be running");
+                } else if e.is_connect() {
+                    warn!("Connection error - check if Ollama is running and accessible at localhost:11434");
                 }
             }
-            
-            // Log project ID if present
-            if let Some(project_id) = &shared_config.openai_project_id {
-                if !project_id.is_empty() {
-                    info!("✅ Using OpenAI Project ID: {}", project_id);
+        }
+    } else {
+        // OpenAI API connectivity test
+        info!("Testing connection to OpenAI API");
+        
+        // Verify API key is configured
+        match &shared_config.openai_api_key {
+            Some(api_key) if !api_key.is_empty() => {
+                // Only show masking for actual keys, not empty ones
+                if api_key.len() > 8 {
+                    let masked_key = format!("{}...{}", &api_key[..4], &api_key[api_key.len()-4..]);
+                    info!("✅ OpenAI API key is configured: {}", masked_key);
+                } else {
+                    info!("✅ OpenAI API key is configured");
                 }
-            }
-            
-            // Test connection to OpenAI API using the models endpoint
-            info!("Testing OpenAI API connectivity...");
-            let mut req_builder = http_client
-                .get("https://api.openai.com/v1/models")
-                .timeout(std::time::Duration::from_secs(5))
-                .header("Authorization", format!("Bearer {}", api_key));
-            
-            // Add org ID if configured
-            if let Some(org_id) = &shared_config.openai_org_id {
-                if !org_id.is_empty() {
-                    req_builder = req_builder.header("OpenAI-Organization", org_id);
+                
+                // Log org ID if present
+                if let Some(org_id) = &shared_config.openai_org_id {
+                    if !org_id.is_empty() {
+                        info!("✅ Using OpenAI Organization ID: {}", org_id);
+                    }
                 }
-            }
-            
-            // Add project ID if configured
-            if let Some(project_id) = &shared_config.openai_project_id {
-                if !project_id.is_empty() {
-                    req_builder = req_builder.header("OpenAI-Project", project_id);
+                
+                // Log project ID if present
+                if let Some(project_id) = &shared_config.openai_project_id {
+                    if !project_id.is_empty() {
+                        info!("✅ Using OpenAI Project ID: {}", project_id);
+                    }
                 }
-            }
-            
-            // Send test request
-            match req_builder.send().await {
-                Ok(resp) => {
-                    if resp.status().is_success() {
-                        info!("✅ Successfully connected to OpenAI API");
-                        let model_name = &shared_config.model_name;
-                        info!("Using model: {}", model_name);
-                    } else {
-                        warn!("⚠️ OpenAI API responded with status code: {}", resp.status());
-                        match resp.text().await {
-                            Ok(body) => warn!("Response body: {}", body),
-                            Err(_) => warn!("Could not read error response body"),
+                
+                // Test connection to OpenAI API using the models endpoint
+                info!("Testing OpenAI API connectivity...");
+                let mut req_builder = http_client
+                    .get("https://api.openai.com/v1/models")
+                    .timeout(std::time::Duration::from_secs(5))
+                    .header("Authorization", format!("Bearer {}", api_key));
+                
+                // Add org ID if configured
+                if let Some(org_id) = &shared_config.openai_org_id {
+                    if !org_id.is_empty() {
+                        req_builder = req_builder.header("OpenAI-Organization", org_id);
+                    }
+                }
+                
+                // Add project ID if configured
+                if let Some(project_id) = &shared_config.openai_project_id {
+                    if !project_id.is_empty() {
+                        req_builder = req_builder.header("OpenAI-Project", project_id);
+                    }
+                }
+                
+                // Send test request
+                match req_builder.send().await {
+                    Ok(resp) => {
+                        if resp.status().is_success() {
+                            info!("✅ Successfully connected to OpenAI API");
+                            let model_name = &shared_config.model_name;
+                            info!("Using model: {}", model_name);
+                        } else {
+                            warn!("⚠️ OpenAI API responded with status code: {}", resp.status());
+                            match resp.text().await {
+                                Ok(body) => warn!("Response body: {}", body),
+                                Err(_) => warn!("Could not read error response body"),
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        warn!("⚠️ Failed to connect to OpenAI API: {}", e);
+                        if e.is_timeout() {
+                            warn!("Connection timed out - OpenAI API may be temporarily unavailable");
+                        } else if e.is_connect() {
+                            warn!("Connection error - check your internet connection and firewall settings");
                         }
                     }
-                },
-                Err(e) => {
-                    warn!("⚠️ Failed to connect to OpenAI API: {}", e);
-                    if e.is_timeout() {
-                        warn!("Connection timed out - OpenAI API may be temporarily unavailable");
-                    } else if e.is_connect() {
-                        warn!("Connection error - check your internet connection and firewall settings");
-                    }
                 }
+            },
+            _ => {
+                warn!("⚠️ No OpenAI API key configured! The service will not work with OpenAI.");
+                warn!("Set the OPENAI_API_KEY environment variable or add it to the config file.");
             }
-        },
-        _ => {
-            warn!("⚠️ No OpenAI API key configured! The service will not work without it.");
-            warn!("Set the OPENAI_API_KEY environment variable or add it to the config file.");
         }
     }
 
