@@ -63,7 +63,12 @@ pub async fn query_llm(
         if let Some(params_map) = params_value.as_object() {
             if let Some(payload_map) = payload.as_object_mut() {
                 for (key, value) in params_map {
-                    payload_map.insert(key.clone(), value.clone());
+                    // Skip 'prompt_template' if it exists in the llm_params
+                    if key != "prompt_template" {
+                        payload_map.insert(key.clone(), value.clone());
+                    } else {
+                        warn!("Skipping 'prompt_template' parameter, as it should not be sent to the API");
+                    }
                 }
             } else {
                 warn!("Payload is not a JSON object, cannot merge llm_params.");
