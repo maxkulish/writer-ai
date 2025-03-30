@@ -14,6 +14,8 @@ pub struct AppConfig {
     pub model_name: String,
     #[serde(default)]
     pub llm_params: Option<Value>,
+    #[serde(default)]
+    pub prompt_template: Option<String>,
 }
 
 // --- Configuration Loading ---
@@ -71,6 +73,12 @@ model_name = "{}"
 #stream = false
 #temperature = 0.7
 #keep_alive = "30m" # Keep model loaded in memory for 30 minutes
+
+# Optional prompt template - uses {{input}} as placeholder for user text
+#prompt_template = """
+#You are a helpful assistant. Please respond to the following:
+#{{input}}
+#"""
 "#,
             app_config.port, app_config.llm_url, app_config.model_name
         );

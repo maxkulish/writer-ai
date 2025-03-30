@@ -12,10 +12,17 @@ pub async fn query_llm(
     config: &AppConfig,
     client: &Client,
 ) -> Result<String, AppError> {
+    // Apply prompt template if configured
+    let final_prompt = if let Some(template) = &config.prompt_template {
+        template.replace("{input}", text)
+    } else {
+        text.to_string()
+    };
+    
     // Construct the base payload
     let mut payload = serde_json::json!({
         "model": config.model_name,
-        "prompt": text,
+        "prompt": final_prompt,
         // Default "stream" to false if not specified in config
         "stream": false,
     });

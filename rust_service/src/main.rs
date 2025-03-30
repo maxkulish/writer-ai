@@ -35,7 +35,7 @@ async fn main() -> Result<(), AppError> {
 
     // Build HTTP client
     let http_client = Client::builder()
-        .timeout(std::time::Duration::from_secs(10)) // 10 seconds timeout for LLMs
+        .timeout(std::time::Duration::from_secs(30)) // 30 seconds timeout for LLMs
         .build()?;
     let shared_client = Arc::new(http_client);
 

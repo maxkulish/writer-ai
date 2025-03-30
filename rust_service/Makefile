@@ -56,3 +56,16 @@ restart: build
 	@echo "Reloading service..."
 	launchctl load $(LAUNCH_AGENT_FILE)
 	@echo "Service restarted"
+
+reload:
+	@echo "Reloading service..."
+	launchctl load $(LAUNCH_AGENT_FILE)
+	@echo "Service restarted"
+
+test:
+	@echo "Running tests..."
+	curl -X POST http://localhost:8989/process -H "Content-Type: application/json" -d '{"text":"My English is not so god. Pleas improve it"}'
+
+logs:
+	@echo "Showing logs..."
+	tail -f /Users/mk/Library/Logs/writer_ai_rust_service.log
