@@ -28,8 +28,11 @@ pub async fn process_text_handler(
     info!("Received text length: {}", req.text.len());
     // debug!("Received text content: {}", req.text); // Uncomment for verbose debugging
 
+    let start_time = std::time::Instant::now();
     let llm_response = query_llm(&req.text, &config, &client).await?;
-
+    let elapsed = start_time.elapsed();
+    
+    info!("Response time: {:.3}ms", elapsed.as_secs_f64() * 1000.0);
     info!("Sending back response length: {}", llm_response.len());
     Ok(Json(ProcessResponse {
         response: llm_response,
