@@ -752,18 +752,50 @@ async fn test_llm_responses() {
     
     println!("Loaded {} test sentences with expected corrections", test_config.sentences.len());
 
-    // Define LLM configurations to test
-    let mut llm_configs = Vec::new();
+    // Define LLM configurations to test - using Arc<AppConfig> directly
+    let mut openai_configs: Vec<Arc<AppConfig>> = Vec::new();
+    let mut ollama_configs: Vec<Arc<AppConfig>> = Vec::new();
+
+    // Read all config files from the config_files directory
+    let config_dir = PathBuf::from("tests/config_files");
+    let mut entries = Vec::new();
+    
+    // With tokio::fs::read_dir, we need to iterate through the stream
+    let mut dir = fs::read_dir(&config_dir).await.expect("Failed to read config directory");
+    while let Some(entry) = dir.next_entry().await.expect("Failed to read directory entry") {
+        entries.push(entry);
+    }
+    
+    // Sort entries for consistent ordering
+    entries.sort_by_key(|e| e.file_name());
+    
+    // Get all config file names
+    let mut config_files = Vec::new();
+    for entry in entries {
+        let file_name = entry.file_name().to_string_lossy().to_string();
+        if file_name.ends_with(".toml") {
+            config_files.push(file_name);
+        }
+    }
+    
+    println!("Found {} config files: {:?}", config_files.len(), config_files);
+    println!("Dynamically loading configs from the config_files directory...");
 
     // Only add OpenAI if we have an API key
     if !api_key.is_empty() {
-        match load_llm_config("config_openai_gpt4o.toml") {
-            Ok(mut config) => {
-                // Set the API key from environment
-                config.openai_api_key = Some(api_key.clone());
-                llm_configs.push(config);
+        // Process OpenAI configs
+        for file_name in &config_files {
+            if file_name.contains("openai") {
+                match load_llm_config(file_name) {
+                    Ok(mut config) => {
+                        // Set the API key from environment
+                        config.openai_api_key = Some(api_key.clone());
+                        println!("  Loaded OpenAI config: {}", file_name);
+                        openai_configs.push(Arc::new(config));
+                    }
+                    Err(e) => println!("  Failed to load OpenAI config {}: {}", file_name, e),
+                }
             }
-            Err(e) => println!("Failed to load OpenAI config: {}", e),
         }
     }
 
@@ -775,19 +807,30 @@ async fn test_llm_responses() {
         .await;
 
     if ollama_check.is_ok() {
-        match load_llm_config("config_ollama_llama2.toml") {
-            Ok(config) => llm_configs.push(config),
-            Err(e) => println!("Failed to load Ollama config: {}", e),
+        // Process Ollama configs
+        for file_name in &config_files {
+            if file_name.contains("ollama") {
+                match load_llm_config(file_name) {
+                    Ok(config) => {
+                        println!("  Loaded Ollama config: {}", file_name);
+                        ollama_configs.push(Arc::new(config));
+                    }
+                    Err(e) => println!("  Failed to load Ollama config {}: {}", file_name, e),
+                }
+            }
         }
     } else {
         println!("⚠️  Ollama server not detected at localhost:11434. Ollama tests will be skipped.");
     }
 
     // If no configs were loaded, skip the test
-    if llm_configs.is_empty() {
+    if openai_configs.is_empty() && ollama_configs.is_empty() {
         println!("No LLM configurations available for testing. Skipping test.");
         return;
     }
+    
+    println!("Testing with {} OpenAI models and {} Ollama models", 
+             openai_configs.len(), ollama_configs.len());
 
     // Create response and results directories
     let response_dir = PathBuf::from("tests/llm_responses");
@@ -798,6 +841,13 @@ async fn test_llm_responses() {
     // Prepare to collect results for CSV export
     let mut all_results = Vec::new();
 
+    // Configs are already grouped by provider type for sequential Ollama processing
+    println!("\nLLM Models loaded for testing:");
+    println!("- OpenAI models ({}): {}", openai_configs.len(), 
+             openai_configs.iter().map(|c| c.model_name.as_str()).collect::<Vec<_>>().join(", "));
+    println!("- Ollama models ({}): {}", ollama_configs.len(),
+             ollama_configs.iter().map(|c| c.model_name.as_str()).collect::<Vec<_>>().join(", "));
+    
     // Test each sentence with each model
     for test_sentence in &test_config.sentences {
         println!("--- Testing sentence ID: {} ---", test_sentence.id);
@@ -807,16 +857,17 @@ async fn test_llm_responses() {
             println!("Expected: '{}'", expected);
         }
 
-        for config in &llm_configs {
+        // Process OpenAI models (can run in parallel if needed)
+        for config in &openai_configs {
             let model_name = &config.model_name;
-            println!("  Testing with model: '{}'", model_name);
+            println!("  Testing with OpenAI model: '{}'", model_name);
 
             // Set up timing metrics
             let mut timing = TimingMetrics::new();
             
             // Create request
             let client = Arc::new(Client::new());
-            let app_state = (Arc::new(config.clone()), client);
+            let app_state = (config.clone(), client);
             let request = ProcessRequest {
                 text: test_sentence.text.clone(),
             };
@@ -829,6 +880,7 @@ async fn test_llm_responses() {
             let latency_ms = timing.milliseconds();
             println!("  Response time: {}ms", latency_ms);
 
+            // Process result and collect metrics
             match result {
                 Ok(response) => {
                     println!("    Response from {}: {}", model_name, response.response);
@@ -930,6 +982,147 @@ async fn test_llm_responses() {
                 }
             }
         }
+        
+        // Process Ollama models strictly one by one to avoid overloading
+        for config in &ollama_configs {
+            let model_name = &config.model_name;
+            println!("  Testing with Ollama model: '{}'", model_name);
+
+            // Set up timing metrics
+            let mut timing = TimingMetrics::new();
+            
+            // Create request
+            let client = Arc::new(Client::new());
+            let app_state = (config.clone(), client);
+            let request = ProcessRequest {
+                text: test_sentence.text.clone(),
+            };
+
+            // Process the request
+            let result = process_text_handler(State(app_state), Json(request)).await;
+            
+            // Stop timing and get duration
+            timing.stop();
+            let latency_ms = timing.milliseconds();
+            println!("  Response time: {}ms", latency_ms);
+
+            // Process result and collect metrics
+            match result {
+                Ok(response) => {
+                    println!("    Response from {}: {}", model_name, response.response);
+                    
+                    // Save response to a file (for backward compatibility)
+                    let response_dir = format!(
+                        "tests/llm_responses/{}",
+                        model_name.replace("/", "_")
+                    );
+                    fs::create_dir_all(&response_dir)
+                        .await
+                        .expect("Failed to create response dir");
+                    let sentence_file_name = format!(
+                        "{}.txt",
+                        test_sentence.id
+                    );
+                    let file_path = format!("{}/{}", response_dir, sentence_file_name);
+                    fs::write(&file_path, &response.response)
+                        .await
+                        .expect("Failed to save response");
+                    
+                    // Calculate metrics if expected output is available
+                    let mut metrics = Metrics {
+                        latency_ms,
+                        ..Default::default()
+                    };
+                    
+                    if let Some(expected) = &test_sentence.expected {
+                        metrics.edit_distance = Some(calculate_edit_distance(&response.response, expected));
+                        metrics.semantic_similarity = Some(calculate_semantic_similarity(&response.response, expected));
+                        metrics.grammar_check_score = Some(calculate_grammar_score(&response.response));
+                        
+                        println!("    Metrics:");
+                        println!("      Edit Distance: {}", metrics.edit_distance.unwrap());
+                        println!("      Semantic Similarity: {:.4}", metrics.semantic_similarity.unwrap());
+                        println!("      Grammar Check Score: {:.4}", metrics.grammar_check_score.unwrap());
+                    }
+                    
+                    // Create test result struct
+                    let test_result = TestResult {
+                        test_id: test_sentence.id.clone(),
+                        input: test_sentence.text.clone(),
+                        expected: test_sentence.expected.clone(),
+                        model_output: response.response.clone(),
+                        model: model_name.clone(),
+                        timestamp: Utc::now(),
+                        metrics,
+                    };
+                    
+                    // Save detailed JSON result
+                    let json_path = save_test_result(&test_result, &results_dir)
+                        .expect("Failed to save test result");
+                    println!("    Detailed result saved to: {:?}", json_path);
+                    
+                    // Add to overall results
+                    all_results.push(test_result);
+                }
+                Err(e) => {
+                    println!("    Error from {}: {:?}", model_name, e);
+                    
+                    // Save error message to file (backward compatibility)
+                    let response_dir = format!(
+                        "tests/llm_responses/{}",
+                        model_name.replace("/", "_")
+                    );
+                    fs::create_dir_all(&response_dir)
+                        .await
+                        .expect("Failed to create response dir");
+                    let sentence_file_name = format!(
+                        "{}_ERROR.txt",
+                        test_sentence.id
+                    );
+                    let file_path = format!("{}/{}", response_dir, sentence_file_name);
+                    fs::write(&file_path, format!("ERROR: {:?}", e))
+                        .await
+                        .expect("Failed to save error");
+                    
+                    // Create error test result
+                    let test_result = TestResult {
+                        test_id: test_sentence.id.clone(),
+                        input: test_sentence.text.clone(),
+                        expected: test_sentence.expected.clone(),
+                        model_output: format!("ERROR: {:?}", e),
+                        model: model_name.clone(),
+                        timestamp: Utc::now(),
+                        metrics: Metrics {
+                            latency_ms,
+                            ..Default::default()
+                        },
+                    };
+                    
+                    // Save detailed JSON result
+                    let json_path = save_test_result(&test_result, &results_dir)
+                        .expect("Failed to save test result");
+                    println!("    Detailed error result saved to: {:?}", json_path);
+                    
+                    // Add to overall results
+                    all_results.push(test_result);
+                }
+            }
+            
+            // Stop the Ollama model after testing to free resources
+            if model_name.contains("ollama") {
+                let model_short_name = model_name.split('/').last().unwrap_or(model_name);
+                println!("  Stopping Ollama model: {}", model_short_name);
+                
+                // Run the command to stop the model
+                match std::process::Command::new("ollama")
+                    .args(["stop", model_short_name])
+                    .output() {
+                        Ok(_) => println!("  Successfully stopped Ollama model: {}", model_short_name),
+                        Err(e) => println!("  Failed to stop Ollama model: {}", e),
+                    }
+            }
+        }
+        
         println!("--- Sentence test complete ---\n");
     }
     
@@ -956,7 +1149,7 @@ async fn test_llm_responses() {
     println!("\n=== LLM Integration Test Summary ===");
     println!("Test Run ID: {}", test_run_id);
     println!("Number of test cases: {}", test_config.sentences.len());
-    println!("Models tested: {}", llm_configs.len());
+    println!("Models tested: {}", openai_configs.len() + ollama_configs.len());
     println!("Total tests run: {}", all_results.len());
     println!("Results directory: {:?}", results_dir);
     println!("CSV results: {:?}", results_dir.join("results.csv"));

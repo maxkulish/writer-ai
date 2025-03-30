@@ -6,8 +6,8 @@ model_name = "gpt-4o"
 openai_api_key = "" # Will be replaced by test environment
 
 [llm_params]
-temperature = 0.7
-max_output_tokens = 500
+temperature = 1
+max_output_tokens = 2048
 top_p = 1
 
 # Prompt template for improving text
