@@ -5,6 +5,7 @@ INSTALL_PATH := /usr/local/bin
 SERVICE_NAME := com.user.writer_ai_rust_service
 LAUNCH_AGENT_DIR := $(HOME)/Library/LaunchAgents
 LAUNCH_AGENT_FILE := $(LAUNCH_AGENT_DIR)/$(SERVICE_NAME).plist
+USER := $(shell whoami)
 
 build:
 	@echo "Building $(BINARY_NAME)..."
@@ -64,8 +65,8 @@ reload:
 
 test:
 	@echo "Running tests..."
-	curl -X POST http://localhost:8989/process -H "Content-Type: application/json" -d '{"text":"My English is not so god. Pleas improve it"}'
+	curl -X POST http://localhost:8989/process -H "Content-Type: application/json" -d '{"text":"My English is no such god. Howe ar you?"}'
 
 logs:
 	@echo "Showing logs..."
-	tail -f /Users/mk/Library/Logs/writer_ai_rust_service.log
+	tail -f /Users/$(USER)/Library/Logs/writer_ai_rust_service.log
