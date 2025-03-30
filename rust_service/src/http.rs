@@ -2,7 +2,7 @@ use axum::Json;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use tracing::{info, instrument};
+use tracing::{info, instrument, warn};
 
 use crate::config::AppConfig;
 use crate::errors::AppError;
@@ -33,7 +33,13 @@ pub async fn process_text_handler(
     let elapsed = start_time.elapsed();
     
     info!("Response time: {:.3}ms", elapsed.as_secs_f64() * 1000.0);
-    info!("Sending back response length: {}", llm_response.len());
+    let response_len = llm_response.len();
+    info!("Sending back response length: {}", response_len);
+    
+    // Check for suspiciously long responses that might indicate LLM hallucinations
+    if response_len > 1000 {
+        warn!("Response is unusually long ({}). Consider reviewing the prompt template.", response_len);
+    }
     Ok(Json(ProcessResponse {
         response: llm_response,
     }))
