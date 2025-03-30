@@ -84,3 +84,5 @@ fastlane/test_output
 
 # Rust
 target/
+
+.DS_Store
