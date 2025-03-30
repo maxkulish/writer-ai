@@ -1,0 +1,80 @@
+# LLM test sentences with expected corrections
+# Configuration for metrics to collect during testing
+metrics_to_collect = ["latency_ms", "edit_distance", "semantic_similarity"]
+export_formats = ["json", "csv"]
+
+# Test sentences with unique IDs and expected corrections
+[[sentences]]
+id = "grammar-001"
+text = "My English is no such god. Howe ar you?"
+expected = "My English isn't very good. How are you?"
+
+[[sentences]]
+id = "grammar-002"
+text = "Weather here change alot. I not used it."
+expected = "The weather here changes a lot. I'm not used to it."
+
+[[sentences]]
+id = "grammar-003"
+text = "I am interesting in learn more about rust programing."
+expected = "I am interested in learning more about Rust programming."
+
+[[sentences]]
+id = "fluency-001"
+text = "The cat sat on the mat and it was very fluffy."
+expected = "The fluffy cat sat on the mat."
+
+[[sentences]]
+id = "spelling-001"
+text = "Runing is good for health, you should do it everyday."
+expected = "Running is good for health. You should do it every day."
+
+[[sentences]]
+id = "tense-001"
+text = "He go to store yesterday for buy milk."
+expected = "He went to the store yesterday to buy milk."
+
+[[sentences]]
+id = "agreement-001"
+text = "They is going to the park later."
+expected = "They are going to the park later."
+
+[[sentences]]
+id = "agreement-002"
+text = "She have a dog and two cats."
+expected = "She has a dog and two cats."
+
+[[sentences]]
+id = "tense-002"
+text = "We are learn Rust now."
+expected = "We are learning Rust now."
+
+[[sentences]]
+id = "redundancy-001"
+text = "This is a sentence with some extra words words that should be removed."
+expected = "This is a sentence with some extra words that should be removed."
+
+[[sentences]]
+id = "it-slang-001"
+text = "It’s borked again after the last deploy. Rolling back now"
+expected = "It's not working again after the last deployment. Rolling back now"
+
+[[sentences]]
+id = "it-slang-002"
+text = "The CI is being flaky — rerunning the job usually makes it pass"
+expected = "The CI is being flaky — rerunning the job usually makes it pass"
+
+[[sentences]]
+id = "it-slang-003"
+text = "We need to nuke the cluster and start from scratch"
+expected = "We need to nuke the cluster and start from scratch"
+
+[[sentences]]
+id = "it-slang-004"
+text = "Prod is on fire. PagerDuty went off 3 times already"
+expected = "Prod is on fire. PagerDuty went off 3 times already"
+
+[[sentences]]
+id = "it-slang-005"
+text = "Looks like a classic PEBKAC — user was in the wrong VPC :)"
+expected = "It appears to be a classic PEBKAC issue — the user was in the wrong VPC :)"
