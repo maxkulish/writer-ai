@@ -3,8 +3,8 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
-use tracing::error;
 use thiserror::Error;
+use tracing::error;
 
 // --- Custom Error Type ---
 #[derive(Error, Debug)]
@@ -31,11 +31,23 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, error_message) = match &self {
-            AppError::Config(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("Configuration error: {}", e)),
-            AppError::Reqwest(e) => (StatusCode::BAD_GATEWAY, format!("LLM request failed: {}", e)),
-            AppError::SerdeJson(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("JSON processing error: {}", e)),
+            AppError::Config(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Configuration error: {}", e),
+            ),
+            AppError::Reqwest(e) => (
+                StatusCode::BAD_GATEWAY,
+                format!("LLM request failed: {}", e),
+            ),
+            AppError::SerdeJson(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("JSON processing error: {}", e),
+            ),
             AppError::LlmApiError(msg) => (StatusCode::BAD_GATEWAY, msg.clone()),
-            AppError::Io(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("IO error: {}", e)),
+            AppError::Io(e) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("IO error: {}", e),
+            ),
             AppError::MissingConfigDir => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             AppError::MissingHomeDir => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),

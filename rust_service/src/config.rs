@@ -1,8 +1,8 @@
-use config::{Config as ConfigLoader, File as ConfigFile, Environment};
+use config::{Config as ConfigLoader, Environment, File as ConfigFile};
 use serde::Deserialize;
 use serde_json::Value;
 use std::path::PathBuf;
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 use crate::errors::AppError;
 
@@ -28,7 +28,10 @@ pub fn load_config() -> Result<AppConfig, AppError> {
     let config_dir = find_config_path()?;
     let config_file_path = config_dir.join("config.toml");
 
-    info!("Attempting to load configuration from: {:?}", config_file_path);
+    info!(
+        "Attempting to load configuration from: {:?}",
+        config_file_path
+    );
 
     let config_loader = ConfigLoader::builder()
         // Set defaults
@@ -45,15 +48,18 @@ pub fn load_config() -> Result<AppConfig, AppError> {
 
     // Check if config file exists, create default if not
     if !config_file_path.exists() {
-        warn!("Config file not found at {:?}. Creating a default one.", config_file_path);
+        warn!(
+            "Config file not found at {:?}. Creating a default one.",
+            config_file_path
+        );
         if !config_dir.exists() {
             std::fs::create_dir_all(&config_dir)?;
             info!("Created config directory: {:?}", config_dir);
         }
-        
+
         // Use potentially overridden defaults for the initial creation
         let default_toml_content = format!(
-r#"# Default LLM Service Configuration
+            r#"# Default LLM Service Configuration
 # Created because the file was missing. Review and adjust as needed.
 
 port = {}
@@ -65,15 +71,16 @@ model_name = "{}"
 #stream = false
 #temperature = 0.7
 "#,
-            app_config.port,
-            app_config.llm_url,
-            app_config.model_name
+            app_config.port, app_config.llm_url, app_config.model_name
         );
-        
+
         std::fs::write(&config_file_path, default_toml_content)?;
         info!("Created default config file at {:?}", config_file_path);
     } else {
-        info!("Loaded configuration successfully from {:?}", config_file_path);
+        info!(
+            "Loaded configuration successfully from {:?}",
+            config_file_path
+        );
     }
 
     debug!("Effective configuration: {:?}", app_config);

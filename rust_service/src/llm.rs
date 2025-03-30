@@ -38,18 +38,18 @@ pub async fn query_llm(
     info!("Sending request to LLM URL: {}", config.llm_url);
     debug!(target: "request_payload", "LLM Payload: {}", payload);
 
-    let res = client
-        .post(&config.llm_url)
-        .json(&payload)
-        .send()
-        .await?;
+    let res = client.post(&config.llm_url).json(&payload).send().await?;
 
     let status = res.status();
     if !status.is_success() {
-        let error_body = res.text().await.unwrap_or_else(|_| "Failed to read error body".to_string());
+        let error_body = res
+            .text()
+            .await
+            .unwrap_or_else(|_| "Failed to read error body".to_string());
         error!("LLM API returned error status {}: {}", status, error_body);
         return Err(AppError::LlmApiError(format!(
-            "LLM API error (Status {}): {}", status, error_body
+            "LLM API error (Status {}): {}",
+            status, error_body
         )));
     }
 
@@ -78,6 +78,7 @@ pub async fn query_llm(
     warn!("LLM response format not recognized: {:?}", response_data);
     Err(AppError::LlmApiError(format!(
         "Unrecognized LLM response format. Received: {}",
-        serde_json::to_string(&response_data).unwrap_or_else(|_| "Non-serializable response".to_string())
+        serde_json::to_string(&response_data)
+            .unwrap_or_else(|_| "Non-serializable response".to_string())
     )))
 }

@@ -1,11 +1,11 @@
 use axum::Json;
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
-use reqwest::Client;
 use tracing::{info, instrument};
 
-use crate::errors::AppError;
 use crate::config::AppConfig;
+use crate::errors::AppError;
 use crate::llm::query_llm;
 
 // --- Request/Response Structs ---
@@ -31,5 +31,7 @@ pub async fn process_text_handler(
     let llm_response = query_llm(&req.text, &config, &client).await?;
 
     info!("Sending back response length: {}", llm_response.len());
-    Ok(Json(ProcessResponse { response: llm_response }))
+    Ok(Json(ProcessResponse {
+        response: llm_response,
+    }))
 }
