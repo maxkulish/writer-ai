@@ -19,13 +19,13 @@ Look for the `HotkeyConfiguration` section in the Info.plist file:
 <key>HotkeyConfiguration</key>
 <dict>
     <key>ModifierFlags</key>
-    <string>control,shift</string>
+    <string>option,shift</string>
     <key>KeyCode</key>
-    <integer>45</integer>
+    <integer>13</integer>
     <key>KeyName</key>
-    <string>N</string>
+    <string>W</string>
     <key>HotkeyDisplayName</key>
-    <string>⇧⌃N (Shift+Control+N)</string>
+    <string>⇧⌥W (Shift+Option+W)</string>
 </dict>
 ```
 

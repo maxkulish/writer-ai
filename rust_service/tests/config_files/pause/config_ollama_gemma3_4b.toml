@@ -1,0 +1,31 @@
+port = 8989
+llm_url = "http://localhost:11434/api/chat"
+model_name = "gemma3:4b"
+
+[llm_params]
+temperature = 1
+max_output_tokens = 2048
+top_p = 1
+
+# Prompt template for improving text
+prompt_template = """Improve the given original text while preserving the writing style and IT slang. Do not replace or provide long versions of specific acronyms or terms: CI, Prod, VPC. Retain all formatting for commands and text within quotes as it appears
+# Steps
+1. Read and understand the original text to ensure the style and intent are preserved.
+2. Identify areas in the text where improvements can be made for clarity, coherence, or grammar without altering the overall style.
+3. Make the necessary improvements while ensuring all IT slang and specified acronyms remain unchanged.
+4. Retain all special formatting for commands or quoted text verbatim.
+# Output Format
+Provide the revised version of the text in a clear and concise manner, maintaining the original structure and style as closely as possible.
+
+# Examples
+**Original Input:**
+"The CI pipeline broke. Error was in the scripts running in `aws s3 ls`. Deployment to Prod is halted. Need to fix it fast. Can someone check the VPC settings?"
+**Improved Output:**
+"The CI pipeline encountered an error. The issue lies within the scripts running the command `aws s3 ls`. Deployment to Prod is currently halted. We need a quick resolution. Could someone verify the VPC settings?"
+# Notes
+- Ensure that you do not change any quoted text or command syntax.
+- Maintain the use of IT slang, acronyms, and specific terms as per user instructions.
+- Focus on enhancing clarity and readability without expanding or altering specified IT terminologies
+
+{{input}}
+"""

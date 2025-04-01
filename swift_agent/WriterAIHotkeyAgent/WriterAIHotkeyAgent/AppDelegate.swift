@@ -25,6 +25,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.removeObject(forKey: "UseTestMode")
         UserDefaults.standard.removeObject(forKey: "ProvideTestContentOnFailure")
         
+        // Set the application dock icon programmatically 
+        if let appImage = NSImage(named: "AppIcon") {
+            NSApp.applicationIconImage = appImage
+        }
+        
         // Check if we were recently restarted - if so, skip immediate accessibility check
         let restartFlag = UserDefaults.standard.bool(forKey: "WasRecentlyRestarted")
         
@@ -144,9 +149,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func createStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         
-        // Set the image or title for the status item
+        // Set the image for the status item using our custom icon
         if let button = statusItem?.button {
-            button.title = "⌨️" // Use a text emoji instead of system symbol which might not be available
+            if let dockImage = NSImage(named: "DockIcon") {
+                // Size the icon appropriately for the status bar (16x16 or 18x18)
+                let newSize = NSSize(width: 18, height: 18)
+                button.image = dockImage
+                button.image?.size = newSize
+            } else {
+                // Fallback to a text emoji if the image isn't available
+                button.title = "⌨️"
+            }
         }
         
         // Create the menu
@@ -985,7 +998,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 keyName: "N",
                 modifierFlags: [.control, .shift],
                 modifierFlagNames: ["Control", "Shift"],
-                displayName: "⇧⌃N (Shift+Control+N)"
+                displayName: "⇧⌥W (Shift+Option+W)"
             )
         }
         
