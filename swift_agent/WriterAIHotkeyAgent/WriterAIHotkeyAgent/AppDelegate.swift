@@ -20,8 +20,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationDidFinishLaunching(_ notification: Notification) {
         print("WriterAI Hotkey Agent started.")
         
-        // Enable AppleScript for paste as suggested for debugging
-        UserDefaults.standard.set(true, forKey: "UseAppleScriptForPaste")
+        // Disable debug settings
+        UserDefaults.standard.removeObject(forKey: "UseAppleScriptForPaste")
+        UserDefaults.standard.removeObject(forKey: "UseTestMode")
+        UserDefaults.standard.removeObject(forKey: "ProvideTestContentOnFailure")
         
         // Check if we were recently restarted - if so, skip immediate accessibility check
         let restartFlag = UserDefaults.standard.bool(forKey: "WasRecentlyRestarted")
@@ -86,7 +88,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     private func setupHotkeyMonitor() {
-    print("Setting up simplified global hotkey monitor for Cmd+Shift+A...")
+    // Read hotkey configuration from Info.plist
+    let hotkeyConfig = readHotkeyConfiguration()
+    let keyName = hotkeyConfig.keyName
+    let modifierNames = hotkeyConfig.modifierFlagNames.joined(separator: "+")
+    
+    print("Setting up simplified global hotkey monitor for \(modifierNames)+\(keyName)...")
 
     // Remove any previously added monitors if this function were called again
     for oldMonitor in monitor {
@@ -94,8 +101,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     monitor.removeAll()
 
-    let requiredFlags: NSEvent.ModifierFlags = [.command, .shift]
-    let A_KEYCODE: UInt16 = 0 // Keycode for 'A'
+    let requiredFlags = hotkeyConfig.modifierFlags
+    let keyCode = hotkeyConfig.keyCode
 
     let globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
         // Use intersection to ensure ONLY the required flags (and potentially Caps Lock) are present.
@@ -103,20 +110,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Let's start with contains() as it's more forgiving.
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask) // Isolate relevant flags
 
-        // --- DEBUGGING --- 
-        // Always print every key press for debugging
-        print("Global KeyDown: Code=\(event.keyCode), Flags=\(flags.rawValue), Chars='\(event.characters ?? "-")'")
-        if event.keyCode == A_KEYCODE {
-            print("A Key Pressed: Flags=\(flags.rawValue), Required=\(requiredFlags.rawValue)")
-            print("  -> Has Command: \(flags.contains(.command))")
-            print("  -> Has Shift: \(flags.contains(.shift))")
+        // Only print key presses with modifiers for basic monitoring
+        if event.keyCode == keyCode && requiredFlags.contains { flag in flags.contains(flag) } {
+            print("\(keyName) Key Pressed with modifiers - \(hotkeyConfig.modifierFlags.map { "\($0): \(flags.contains($0))" }.joined(separator: ", "))")
         }
-        // --- END DEBUGGING ---
 
-        if event.keyCode == A_KEYCODE && flags.contains(requiredFlags) {
+        if event.keyCode == keyCode && requiredFlags.allSatisfy({ flags.contains($0) }) {
              // Optional: Check if ONLY required flags are pressed ( stricter )
-             // if event.keyCode == A_KEYCODE && flags == requiredFlags {
-             print("✅ GLOBAL HOTKEY DETECTED: Cmd+Shift+A")
+             // if event.keyCode == keyCode && flags == requiredFlags {
+             print("✅ GLOBAL HOTKEY DETECTED: \(modifierNames)+\(keyName)")
              self?.handleHotkey()
          }
     }
@@ -156,7 +158,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(statusMenuItem)
         
         // Add a hotkey info item
-        let hotkeyInfoItem = NSMenuItem(title: "Hotkey: ⇧⌘A (Shift+Command+A)", action: nil, keyEquivalent: "")
+        let hotkeyConfig = readHotkeyConfiguration()
+        let hotkeyInfoItem = NSMenuItem(title: "Hotkey: \(hotkeyConfig.displayName)", action: nil, keyEquivalent: "")
         hotkeyInfoItem.isEnabled = false
         menu.addItem(hotkeyInfoItem)
         
@@ -169,6 +172,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let openSettingsItem = NSMenuItem(title: "Open Accessibility Settings", action: #selector(openAccessibilitySettings(_:)), keyEquivalent: "o")
         openSettingsItem.target = self
         menu.addItem(openSettingsItem)
+        
+        // Add an item to open automation settings
+        let openAutomationItem = NSMenuItem(title: "Open Automation Settings", action: #selector(openAutomationSettings(_:)), keyEquivalent: "a")
+        openAutomationItem.target = self
+        menu.addItem(openAutomationItem)
         
         menu.addItem(NSMenuItem.separator())
         
@@ -211,94 +219,84 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    @objc private func openAutomationSettings(_ sender: Any?) {
+        // Try to open the security preferences directly to the automation pane
+        let automationURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
+        if NSWorkspace.shared.open(automationURL) {
+            print("Opened System Settings > Privacy & Security > Automation")
+        } else {
+            // Fallback to opening Security & Privacy in general
+            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security")!)
+            print("Opened System Settings > Privacy & Security")
+        }
+    }
+    
     @objc private func testHotkey(_ sender: Any?) {
         print("Manual test of hotkey processing triggered")
         
-        // Try manually triggering the full hotkey handler for complete testing
-        handleHotkey()
+        // Use the input dialog for test mode since we're being explicit about testing
+        self.showManualTextEntryDialog(completion: { text in
+            if let text = text, !text.isEmpty {
+                // Process the manually entered text
+                self.processTextWithFallbacks(text, originalTypes: nil, originalContent: nil)
+            }
+        })
     }
     
     @objc private func testRustConnection(_ sender: Any?) {
         print("Testing connection to Rust service...")
         
-        // Create a simple HTTP request to check if the server is responding
-        var request = URLRequest(url: rustServiceUrl)
-        request.timeoutInterval = 10 // 10 seconds timeout for connection test
-        
-        // Create a dedicated session with custom configuration
-        let sessionConfig = URLSessionConfiguration.default
-        sessionConfig.timeoutIntervalForRequest = 10.0  // 10 seconds timeout 
-        sessionConfig.waitsForConnectivity = true      // Wait for connectivity if not available
-        let session = URLSession(configuration: sessionConfig)
-        
-        session.dataTask(with: request) { _, response, error in
-            DispatchQueue.main.async {
-                if let error = error {
-                    print("❌ Connection test failed: \(error.localizedDescription)")
-                    
-                    // Show error notification
-                    self.showErrorNotification(title: "Connection Failed", 
-                                              message: "Could not connect to Rust service: \(error.localizedDescription)")
-                    
-                    // Show alert with helpful info
-                    let alert = NSAlert()
-                    alert.messageText = "Connection to Rust Service Failed"
-                    alert.informativeText = "Could not connect to the Rust service at \(self.rustServiceUrl).\n\nError: \(error.localizedDescription)\n\nPlease ensure the Rust service is running on port 8989."
-                    alert.alertStyle = .warning
-                    alert.runModal()
-                    
-                } else if let httpResponse = response as? HTTPURLResponse {
-                    let statusCode = httpResponse.statusCode
-                    print("✅ Connection test completed with status code: \(statusCode)")
-                    
-                    // Even a 404 or error status code means the server is responding
-                    self.showSuccessNotification(title: "Connection Successful", 
-                                               message: "Successfully connected to Rust service (Status: \(statusCode))")
-                    
-                    // Now try a sample text processing after confirming connection
-                    self.testDirectTextProcessing()
+        // Show a dialog to get test text input
+        self.showManualTextEntryDialog(completion: { text in
+            guard let text = text, !text.isEmpty else { return }
+            
+            print("Testing connection with text: \(text)")
+            
+            // Create a dedicated session with custom configuration
+            let sessionConfig = URLSessionConfiguration.default
+            sessionConfig.timeoutIntervalForRequest = 30.0  // 30 seconds timeout
+            sessionConfig.waitsForConnectivity = true      // Wait for connectivity if not available
+            let session = URLSession(configuration: sessionConfig)
+            
+            // Send text directly to service to test connection
+            self.sendToRustService(text: text) { result in
+                DispatchQueue.main.async {
+                    switch result {
+                    case .success(let response):
+                        print("✅ Connection test successful!")
+                        
+                        // Show success with response preview
+                        let alert = NSAlert()
+                        alert.messageText = "Connection Successful"
+                        alert.informativeText = "Successfully connected to Rust service.\n\nResponse: \(response.prefix(300))\(response.count > 300 ? "..." : "")"
+                        alert.alertStyle = .informational
+                        alert.runModal()
+                        
+                    case .failure(let error):
+                        print("❌ Connection test failed: \(error.localizedDescription)")
+                        
+                        // Show error notification
+                        self.showErrorNotification(title: "Connection Failed", 
+                                                  message: "Could not connect to Rust service: \(error.localizedDescription)")
+                        
+                        // Show alert with helpful info
+                        let alert = NSAlert()
+                        alert.messageText = "Connection to Rust Service Failed"
+                        alert.informativeText = "Could not connect to the Rust service at \(self.rustServiceUrl).\n\nError: \(error.localizedDescription)\n\nPlease ensure the Rust service is running on port 8989."
+                        alert.alertStyle = .warning
+                        alert.runModal()
+                    }
                 }
             }
-        }.resume()
+        })
     }
     
-    private func testDirectTextProcessing() {
-        print("Testing direct text processing with sample text...")
-        
-        // Use a predefined sample text
-        let sampleText = "This is a test of the WriterAI system."
-        print("Sample input: \"\(sampleText)\"")
-        
-        // Use the direct URLSession method
-        sendToRustService(text: sampleText) { result in
-            self.handleRequestResult(result)
-        }
-    }
+    // Removed testDirectTextProcessing() since it's now handled by the testRustConnection method
     
     // This function has been intentionally removed as part of the simplification process
     // The functionality is now handled directly by the sendToRustService function
     
-    private func handleRequestResult(_ result: Result<String, Error>) {
-        DispatchQueue.main.async {
-            switch result {
-            case .success(let response):
-                print("✅ Got response from Rust service!")
-                print("Response: \"\(response)\"")
-                
-                // Show a success notification
-                self.showSuccessNotification(title: "Test Successful", 
-                                           message: "Successfully processed text. Response: \"\(response.prefix(50))\"")
-                
-            case .failure(let error):
-                print("❌ Error from Rust service: \(error)")
-                
-                // Show a more detailed error for troubleshooting
-                let errorMessage = self.friendlyErrorMessage(for: error)
-                self.showErrorNotification(title: "Test Failed", 
-                                         message: "Error processing text: \(errorMessage)")
-            }
-        }
-    }
+    // Removed handleRequestResult since it's now handled directly in the appropriate methods
     
     private func showSuccessNotification(title: String, message: String) {
         let content = UNMutableNotificationContent()
@@ -320,19 +318,42 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let accessEnabled = AXIsProcessTrusted()
         print("DEBUG: AXIsProcessTrusted() returned: \(accessEnabled)")
         
+        // Check current macOS version for additional context
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersion
+        print("DEBUG: macOS version: \(osVersion.majorVersion).\(osVersion.minorVersion).\(osVersion.patchVersion)")
+        
+        // Check if we're a hardened runtime
+        let hardenedRuntime = Bundle.main.infoDictionary?["com.apple.security.get-task-allow"] != nil
+        print("DEBUG: App using hardened runtime: \(hardenedRuntime)")
+        
         // Try a simple AppleScript to test if we can actually control the system
         var canControlSystem = false
-        let appleScript = NSAppleScript(source: "tell application \"System Events\" to return name of first process")
-        var error: NSDictionary?
-        if let scriptResult = appleScript?.executeAndReturnError(&error) {
-            print("DEBUG: AppleScript control test succeeded with result: \(scriptResult.stringValue ?? "no value")")
-            canControlSystem = true
-        } else if let err = error {
-            print("DEBUG: AppleScript control test failed: \(err)")
-            if let errMsg = err[NSAppleScript.errorMessage] as? String {
-                print("DEBUG: AppleScript control test error message: \(errMsg)")
+        
+        // Try several different AppleScript tests to pinpoint the issue
+        let testScripts = [
+            "Basic test": "tell application \"System Events\" to return name of first process",
+            "Clipboard test": "set the clipboard to \"test\"",
+            "Key press test": "tell application \"System Events\" to keystroke \"a\"",
+        ]
+        
+        for (testName, scriptSource) in testScripts {
+            print("DEBUG: Running AppleScript test: \(testName)")
+            let appleScript = NSAppleScript(source: scriptSource)
+            var error: NSDictionary?
+            if let scriptResult = appleScript?.executeAndReturnError(&error) {
+                print("DEBUG: AppleScript \(testName) succeeded with result: \(scriptResult.stringValue ?? "no value")")
+                // If any test passes, we have some level of control
+                canControlSystem = true
+            } else if let err = error {
+                print("DEBUG: AppleScript \(testName) failed: \(err)")
+                if let errMsg = err[NSAppleScript.errorMessage] as? String {
+                    print("DEBUG: AppleScript \(testName) error message: \(errMsg)")
+                }
             }
         }
+        
+        // Try direct TCC database check (won't work in sandboxed apps)
+        print("DEBUG: Checking app bundle identifier: \(Bundle.main.bundleIdentifier ?? "unknown")")
         
         // Update the status menu item
         if let menu = statusItem?.menu, let statusItem = menu.item(at: 0) {
@@ -345,13 +366,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
         
-        // Also log to console
+        // Also log to console with more context
         print("Accessibility permissions - API status: \(accessEnabled ? "Enabled" : "Disabled"), Can control system: \(canControlSystem ? "Yes" : "No")")
         
         // If accessibility is granted according to API but we can't control the system,
-        // the app likely needs to be restarted to pick up the permission
+        // there might be additional permissions needed or a restart required
         if accessEnabled && !canControlSystem {
+            // Check if Automation permissions are enabled
+            let automationScript = NSAppleScript(source: "tell application \"System Events\" to return name of first process")
+            var automationError: NSDictionary?
+            automationScript?.executeAndReturnError(&automationError)
+            
+            // Check if this is a permission issue or something else
+            let isPermissionIssue = automationError?[NSAppleScript.errorNumber] as? Int == -1743
+            
             print("⚠️ Permission appears to be granted but not effective. Try restarting the app.")
+            print("DEBUG: Is this an automation permission issue? \(isPermissionIssue)")
             
             // Check if we were recently restarted
             let wasRecentlyRestarted = UserDefaults.standard.bool(forKey: "WasRecentlyRestarted")
@@ -367,9 +397,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     let alert = NSAlert()
                     alert.messageText = "Permission Issues Persist"
-                    alert.informativeText = "Try these steps:\n\n1. Quit this app completely\n2. Go to System Settings > Privacy & Security > Accessibility\n3. Remove this app from the list\n4. Add it back and ensure the checkbox is enabled\n5. Start the app again"
+                    alert.informativeText = "Try these steps:\n\n1. Quit this app completely\n2. Go to System Settings > Privacy & Security > Accessibility\n3. Remove this app from the list\n4. Add it back and ensure the checkbox is enabled\n5. IMPORTANT: Also check System Settings > Privacy & Security > Automation and add this app if not present\n6. Restart your Mac completely\n7. Start the app again"
                     alert.alertStyle = .warning
                     alert.addButton(withTitle: "Open Accessibility Settings")
+                    alert.addButton(withTitle: "Open Automation Settings")
                     alert.addButton(withTitle: "Quit App")
                     alert.addButton(withTitle: "Continue Anyway")
                     
@@ -377,22 +408,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     if response == .alertFirstButtonReturn {
                         self.openAccessibilitySettings(nil)
                     } else if response == .alertSecondButtonReturn {
+                        // Open Automation settings
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!)
+                    } else if response == .alertThirdButtonReturn {
                         NSApp.terminate(nil)
                     }
                 }
             } else {
-                // First time noticing this issue - suggest restart
+                // First time noticing this issue - suggest restart and check Automation
                 // Show restart recommendation
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
                     let alert = NSAlert()
                     alert.messageText = "App Restart Recommended"
-                    alert.informativeText = "Accessibility permission has been granted, but macOS may require the app to be restarted for it to take effect.\n\nWould you like to restart the app now?"
+                    alert.informativeText = "Accessibility permission has been granted, but you also need to grant Automation permission.\n\n1. Open System Settings > Privacy & Security > Automation\n2. Find this app in the list and enable it for \"System Events\"\n3. Restart the app\n\nWould you like to open Automation settings now?"
                     alert.alertStyle = .informational
-                    alert.addButton(withTitle: "Restart Now")
+                    alert.addButton(withTitle: "Open Automation Settings")
+                    alert.addButton(withTitle: "Restart App")
                     alert.addButton(withTitle: "Later")
                     
                     let response = alert.runModal()
                     if response == .alertFirstButtonReturn {
+                        // Open Automation settings
+                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!)
+                    } else if response == .alertSecondButtonReturn {
                         self.restartApp(nil)
                     }
                 }
@@ -420,117 +458,34 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
+    // Track if we're already handling a hotkey to prevent double-triggers
+    private var isHandlingHotkey = false
+    
     private func handleHotkey() {
-        print("🔥 HOTKEY HANDLER ACTIVATED: Command+Shift+A 🔥")
-        
-        // Test if we can actually control the system rather than just check the API
-        var canControlSystem = false
-        let testScript = NSAppleScript(source: "tell application \"System Events\" to return name of first process")
-        var error: NSDictionary?
-        print("DEBUG: Checking if we can control the system before proceeding...")
-        if let scriptResult = testScript?.executeAndReturnError(&error) {
-            print("DEBUG: AppleScript control test succeeded: \(scriptResult.stringValue ?? "no result")")
-            canControlSystem = true
-        } else if let err = error {
-            print("DEBUG: AppleScript control test failed: \(err)")
-            if let errMsg = err[NSAppleScript.errorMessage] as? String {
-                print("DEBUG: AppleScript control test error message: \(errMsg)")
-            }
+        // Prevent multiple simultaneous processing of the same hotkey event
+        if isHandlingHotkey {
+            print("⚠️ Already handling a hotkey event, ignoring this one")
+            return
         }
         
-        // Check UserDefaults for a flag to bypass accessibility check (for troubleshooting)
-        let bypassAccessibilityCheck = UserDefaults.standard.bool(forKey: "BypassAccessibilityCheck")
+        // Get the current hotkey config for accurate logging
+        let hotkeyConfig = readHotkeyConfiguration()
+        print("🔥 HOTKEY HANDLER ACTIVATED: \(hotkeyConfig.modifierFlagNames.joined(separator: "+"))+\(hotkeyConfig.keyName) 🔥")
         
-        // Force bypass already set at app launch
+        // Set flag to prevent duplicate triggers
+        isHandlingHotkey = true
         
-        if !canControlSystem && !bypassAccessibilityCheck {
-            print("ERROR: Accessibility functionality is not working properly.")
-            
-            // Check the API status
-            let accessEnabled = AXIsProcessTrusted()
-            
-            // Check if we've already tried restarting
-            let wasRecentlyRestarted = UserDefaults.standard.bool(forKey: "WasRecentlyRestarted")
-            
-            if accessEnabled {
-                if wasRecentlyRestarted {
-                    // We already tried restarting and it didn't work
-                    let alert = NSAlert()
-                    alert.messageText = "Accessibility Issues Persist"
-                    alert.informativeText = "Despite app restart, accessibility permissions are still not working properly.\n\nWould you like to:\n1. Try again with manual text entry\n2. Proceed anyway (results may be limited)\n3. Quit the app to troubleshoot"
-                    alert.alertStyle = .warning
-                    alert.addButton(withTitle: "Try Manual Text Entry")
-                    alert.addButton(withTitle: "Proceed Anyway")
-                    alert.addButton(withTitle: "Quit App")
-                    
-                    let response = alert.runModal()
-                    if response == .alertFirstButtonReturn {
-                        // Use manual text entry
-                        testDirectTextProcessing()
-                        return
-                    } else if response == .alertSecondButtonReturn {
-                        // Bypass check for this session
-                        UserDefaults.standard.set(true, forKey: "BypassAccessibilityCheck")
-                        print("⚠️ Bypassing accessibility check for this session")
-                        // Continue with execution
-                    } else {
-                        NSApp.terminate(nil)
-                        return
-                    }
-                } else {
-                    // First time noticing this issue - suggest restart
-                    print("⚠️ Permission appears to be granted but not effective. Try restarting the app.")
-                    
-                    let alert = NSAlert()
-                    alert.messageText = "App Restart Required"
-                    alert.informativeText = "Accessibility permission has been granted, but macOS requires the app to be restarted for it to take effect.\n\nWould you like to restart the app now?"
-                    alert.alertStyle = .warning
-                    alert.addButton(withTitle: "Restart Now")
-                    alert.addButton(withTitle: "Use Manual Text Entry")
-                    alert.addButton(withTitle: "Later")
-                    
-                    let response = alert.runModal()
-                    if response == .alertFirstButtonReturn {
-                        restartApp(nil)
-                        return
-                    } else if response == .alertSecondButtonReturn {
-                        // Use manual text entry
-                        testDirectTextProcessing()
-                        return
-                    } else {
-                        return
-                    }
-                }
-            } else {
-                // Permission not granted
-                showErrorNotification(title: "Accessibility Required", 
-                                     message: "Writer AI needs accessibility permissions to copy and paste text.")
-                
-                let alert = NSAlert()
-                alert.messageText = "Accessibility Permission Required"
-                alert.informativeText = "Writer AI needs accessibility permissions to detect hotkeys and manipulate text.\n\nPlease go to System Settings > Privacy & Security > Accessibility and add this app to the list."
-                alert.alertStyle = .warning
-                alert.addButton(withTitle: "Open Accessibility Settings")
-                alert.addButton(withTitle: "Use Manual Text Entry")
-                alert.addButton(withTitle: "Cancel")
-                
-                let response = alert.runModal()
-                if response == .alertFirstButtonReturn {
-                    openAccessibilitySettings(nil)
-                    return
-                } else if response == .alertSecondButtonReturn {
-                    // Use manual text entry
-                    testDirectTextProcessing()
-                    return
-                } else {
-                    return
-                }
-            }
+        // Reset flag after a reasonable timeout even if processing fails
+        let resetTimer = DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+            self?.isHandlingHotkey = false
         }
         
-        // If we got this far, either accessibility works or we're bypassing the check
-        
+        // Instead of relying on AppleScript, let's use our CGEvent approach directly
+        // No need to check automation permissions for the direct approach
         print("⌨️ Hotkey triggered - processing selected text...")
+        
+        // Use normal workflow - copy selected text and process it
+        print("Using production workflow - will copy selected text and process it")
         
         // 1. Get selected text via Copy simulation
         // Store the original types instead of trying to copy the items directly
@@ -540,10 +495,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return originalPasteboard.string(forType: type)
         }
         
+        // Use direct CGEvent approach for copy
         simulateCopy { success in
             guard success else {
                 self.showErrorNotification(title: "Copy Failed", message: "Could not simulate Cmd+C. Check Accessibility permissions.")
                 self.restorePasteboard(originalTypes: originalTypes, originalContent: originalContent)
+                self.isHandlingHotkey = false
+                print("✅ Hotkey handler reset after copy failure - ready for next hotkey")
                 return
             }
             
@@ -552,12 +510,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let selectedText = NSPasteboard.general.string(forType: .string), !selectedText.isEmpty else {
                     print("No text found on clipboard after copy attempt.")
                     self.restorePasteboard(originalTypes: originalTypes, originalContent: originalContent)
+                    self.isHandlingHotkey = false
+                    print("✅ Hotkey handler reset after no text found - ready for next hotkey")
                     return
                 }
                 
                 print("Selected Text Length: \(selectedText.count)")
                 
-                // 2. Process text - first try via curl, then fallback to direct method
+                // 2. Process text directly
                 self.processTextWithFallbacks(selectedText, originalTypes: originalTypes, originalContent: originalContent)
             }
         }
@@ -585,6 +545,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         } else {
                             print("Paste simulation successful.")
                         }
+                        
+                        // Reset the hotkey handling flag on both success and failure
+                        self.isHandlingHotkey = false
+                        print("✅ Hotkey handler reset - ready for next hotkey")
                     }
                     
                 case .failure(let error):
@@ -595,6 +559,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self.showErrorNotification(title: "Processing Error", message: errorMessage)
                     // Restore original clipboard on error
                     self.restorePasteboard(originalTypes: originalTypes, originalContent: originalContent)
+                    // Reset hotkey handling flag on error
+                    self.isHandlingHotkey = false
+                    print("✅ Hotkey handler reset after error - ready for next hotkey")
                 }
             }
         }
@@ -607,14 +574,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func simulateCopy(completion: @escaping (Bool) -> Void) {
         print("Simulating Cmd+C...")
-        // For testing, let's use a hardcoded text so we don't need to actually copy
-        if UserDefaults.standard.bool(forKey: "UseTestMode") {
-            print("Using test mode with hardcoded text")
-            NSPasteboard.general.clearContents()
-            NSPasteboard.general.setString("This is test text that will be processed by WriterAI", forType: .string)
-            completion(true)
-            return
-        }
         
         // Clear pasteboard *before* copy to help ensure we get the new content
         NSPasteboard.general.clearContents()
@@ -642,8 +601,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let cmdKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false)
             cmdKeyUp?.post(tap: .cghidEventTap)
             
-            // Check if we got something in the pasteboard
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+            // Check if we got something in the pasteboard with longer delay for reliability
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { // Increased delay to 500ms
                 // DEBUG: Add the suggested debug print
                 print("DEBUG: Clipboard content after copy simulation: \(NSPasteboard.general.string(forType: .string) ?? "nil")")
                 
@@ -651,11 +610,83 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 if hasPasteboardContent {
                     completion(true)
                 } else {
-                    // Fallback to AppleScript if CGEvent approach fails
-                    print("CGEvent copy failed, falling back to AppleScript...")
-                    self.runAppleScript(script: #"tell application "System Events" to keystroke "c" using {command down}"#, completion: completion)
+                    // If we're testing, provide fallback content
+                    if UserDefaults.standard.bool(forKey: "ProvideTestContentOnFailure") {
+                        print("Copy failed, but providing test content anyway due to defaults setting")
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString("Fallback test content for WriterAI", forType: .string)
+                        completion(true)
+                    } else {
+                        // Check if we have automation permissions before falling back
+                        let automationWorking = self.checkAutomationPermission()
+                        if automationWorking {
+                            // Fallback to AppleScript if CGEvent approach fails and we have permissions
+                            print("CGEvent copy failed, falling back to AppleScript...")
+                            self.runAppleScript(script: #"tell application "System Events" to keystroke "c" using {command down}"#, completion: completion)
+                        } else {
+                            // Show an alert about copy failure and prompt for manual entry
+                            print("Copy simulation failed and automation unavailable")
+                            
+                            DispatchQueue.main.async {
+                                let alert = NSAlert()
+                                alert.messageText = "Copy Operation Failed"
+                                alert.informativeText = "We couldn't access your selected text. Would you like to enter text manually for processing?"
+                                alert.alertStyle = .warning
+                                alert.addButton(withTitle: "Enter Text Manually")
+                                alert.addButton(withTitle: "Cancel")
+                                
+                                let response = alert.runModal()
+                                if response == .alertFirstButtonReturn {
+                                    // Show input dialog
+                                    self.showManualTextEntryDialog(completion: { text in
+                                        if let text = text, !text.isEmpty {
+                                            NSPasteboard.general.clearContents()
+                                            NSPasteboard.general.setString(text, forType: .string)
+                                            completion(true)
+                                        } else {
+                                            completion(false)
+                                        }
+                                    })
+                                } else {
+                                    completion(false)
+                                }
+                            }
+                        }
+                    }
                 }
             }
+        }
+    }
+    
+    private func showManualTextEntryDialog(completion: @escaping (String?) -> Void) {
+        let alert = NSAlert()
+        alert.messageText = "Enter Text to Process"
+        alert.informativeText = "Please enter or paste the text you want WriterAI to process:"
+        alert.alertStyle = .informational
+        
+        let textField = NSTextField(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        textField.placeholderString = "Enter text here..."
+        textField.isEditable = true
+        textField.isSelectable = true
+        
+        // Create a scroll view to contain the text field for better UX with long text
+        let scrollView = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 200))
+        scrollView.documentView = textField
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        
+        alert.accessoryView = scrollView
+        
+        alert.addButton(withTitle: "Process")
+        alert.addButton(withTitle: "Cancel")
+        
+        let response = alert.runModal()
+        
+        if response == .alertFirstButtonReturn {
+            completion(textField.stringValue)
+        } else {
+            completion(nil)
         }
     }
     
@@ -665,45 +696,57 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         
-        // Small delay for clipboard to settle before pasting
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { // 250ms delay
-            // Try direct key event simulation for better reliability
-            let source = CGEventSource(stateID: .combinedSessionState)
-            
-            // Create key down event for command key (modifiers)
-            let cmdKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: true) // 0x37 is Command key
-            cmdKeyDown?.flags = .maskCommand
-            cmdKeyDown?.post(tap: .cghidEventTap)
-            
-            // Create key down event for 'v' key
-            let vKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true) // 0x09 is 'v' key
-            vKeyDown?.flags = .maskCommand
-            vKeyDown?.post(tap: .cghidEventTap)
-            
-            // Create key up event for 'v' key
-            let vKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
-            vKeyUp?.post(tap: .cghidEventTap)
-            
-            // Create key up event for command key
-            let cmdKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false)
-            cmdKeyUp?.post(tap: .cghidEventTap)
-            
-            // Check if paste succeeded (no foolproof way except timing)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                // DEBUG: Check if pasteboard still contains the expected text
-                print("DEBUG: Clipboard content before paste: \(NSPasteboard.general.string(forType: .string) ?? "nil")")
+        // Try a much simpler approach - doing a single paste with no repeat
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { // 300ms delay
+            // Use NSAppleScript as a fallback method
+            // This is cleaner and avoids double-paste issues that might occur with CGEvent
+            let pasteScript = "tell application \"System Events\" to keystroke \"v\" using command down"
+            self.runAppleScript(script: pasteScript) { success in
+                print("DEBUG: Paste complete via AppleScript - success: \(success)")
+                print("DEBUG: Clipboard contains: \(NSPasteboard.general.string(forType: .string) ?? "nil")")
                 
-                // Fallback to AppleScript if user reports issues with CGEvent approach
-                if UserDefaults.standard.bool(forKey: "UseAppleScriptForPaste") {
-                    print("Using AppleScript for paste based on user preference...")
-                    self.runAppleScript(script: #"tell application "System Events" to keystroke "v" using {command down}"#, completion: completion)
-                } else {
-                    // Assume CGEvent worked
-                    print("DEBUG: Using CGEvent paste - assuming it worked")
+                if !success {
+                    // Fallback to CGEvent approach if AppleScript fails
+                    print("DEBUG: AppleScript paste failed, trying CGEvent method")
+                    
+                    let source = CGEventSource(stateID: .combinedSessionState)
+                    
+                    // Command down
+                    let cmdKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: true)
+                    cmdKeyDown?.flags = .maskCommand
+                    cmdKeyDown?.post(tap: .cghidEventTap)
+                    
+                    // V down
+                    let vKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
+                    vKeyDown?.flags = .maskCommand
+                    vKeyDown?.post(tap: .cghidEventTap)
+                    
+                    // V up
+                    let vKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
+                    vKeyUp?.post(tap: .cghidEventTap)
+                    
+                    // Command up
+                    let cmdKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false)
+                    cmdKeyUp?.post(tap: .cghidEventTap)
+                }
+                
+                // Complete with success after a small delay
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
                     completion(true)
                 }
             }
         }
+    }
+    
+    // Helper function to check if automation permission is working
+    private func checkAutomationPermission() -> Bool {
+        // Try a simple AppleScript to test if we can control System Events
+        let testScript = NSAppleScript(source: "tell application \"System Events\" to return name of first process")
+        var error: NSDictionary?
+        if let _ = testScript?.executeAndReturnError(&error) {
+            return true
+        }
+        return false
     }
     
     private func restorePasteboard(originalTypes: [NSPasteboard.PasteboardType]?, originalContent: [String]?) {
@@ -908,6 +951,120 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 print("Error delivering notification: \(error)")
             }
         }
+    }
+    
+    // MARK: - Hotkey Configuration
+    
+    /// Structure to hold hotkey configuration details
+    struct HotkeyConfig {
+        let keyCode: UInt16
+        let keyName: String
+        let modifierFlags: [NSEvent.ModifierFlags]
+        let modifierFlagNames: [String]
+        let displayName: String
+    }
+    
+    /// Reads hotkey configuration from Info.plist or returns default values
+    private func readHotkeyConfiguration() -> HotkeyConfig {
+        // Print the bundle identifier for debugging
+        print("DEBUG: Reading config for bundle: \(Bundle.main.bundleIdentifier ?? "unknown")")
+        
+        // Print all keys in the Info.plist
+        if let infoPlist = Bundle.main.infoDictionary {
+            print("DEBUG: Info.plist keys: \(infoPlist.keys.sorted().joined(separator: ", "))")
+        } else {
+            print("DEBUG: Could not read Info.plist at all!")
+        }
+        
+        guard let infoPlist = Bundle.main.infoDictionary,
+              let hotkeyConfig = infoPlist["HotkeyConfiguration"] as? [String: Any] else {
+            // Default to Ctrl+Shift+N if no configuration found
+            print("No hotkey configuration found in Info.plist, using default Ctrl+Shift+N")
+            return HotkeyConfig(
+                keyCode: 45,
+                keyName: "N",
+                modifierFlags: [.control, .shift],
+                modifierFlagNames: ["Control", "Shift"],
+                displayName: "⇧⌃N (Shift+Control+N)"
+            )
+        }
+        
+        // Read key code and name
+        let keyCode = (hotkeyConfig["KeyCode"] as? NSNumber)?.uint16Value ?? 45
+        let keyName = (hotkeyConfig["KeyName"] as? String) ?? "N"
+        
+        // Read modifier flags
+        let modifierFlagsString = (hotkeyConfig["ModifierFlags"] as? String) ?? "control,shift"
+        let modifierNames = modifierFlagsString.components(separatedBy: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        
+        // Convert string flags to NSEvent.ModifierFlags
+        let modifierFlags = modifierNames.compactMap { flagName -> NSEvent.ModifierFlags? in
+            switch flagName.lowercased() {
+            case "command", "cmd":
+                return .command
+            case "shift":
+                return .shift
+            case "control", "ctrl":
+                return .control
+            case "option", "alt":
+                return .option
+            case "function", "fn":
+                return .function
+            default:
+                print("Unknown modifier flag: \(flagName)")
+                return nil
+            }
+        }
+        
+        // Read display name or generate one
+        let displayName = (hotkeyConfig["HotkeyDisplayName"] as? String) ?? {
+            // Generate default display name if not provided
+            let symbols = modifierNames.map { name -> String in
+                switch name.lowercased() {
+                case "command", "cmd":
+                    return "⌘"
+                case "shift":
+                    return "⇧"
+                case "control", "ctrl":
+                    return "⌃"
+                case "option", "alt":
+                    return "⌥"
+                case "function", "fn":
+                    return "fn"
+                default:
+                    return name
+                }
+            }.joined()
+            
+            let readableNames = modifierNames.map { name -> String in
+                switch name.lowercased() {
+                case "command", "cmd":
+                    return "Command"
+                case "shift":
+                    return "Shift"
+                case "control", "ctrl":
+                    return "Control"
+                case "option", "alt":
+                    return "Option"
+                case "function", "fn":
+                    return "Function"
+                default:
+                    return name.capitalized
+                }
+            }.joined(separator: "+")
+            
+            return "\(symbols)\(keyName) (\(readableNames)+\(keyName))"
+        }()
+        
+        print("Loaded hotkey configuration: Key=\(keyName) (code \(keyCode)), Modifiers=\(modifierNames.joined(separator: "+"))")
+        
+        return HotkeyConfig(
+            keyCode: keyCode,
+            keyName: keyName,
+            modifierFlags: modifierFlags,
+            modifierFlagNames: modifierNames.map { $0.capitalized },
+            displayName: displayName
+        )
     }
     
     // This function has been intentionally removed as part of the simplification process

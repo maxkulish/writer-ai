@@ -4,6 +4,8 @@
 <dict>
     <key>LSUIElement</key>
     <true/>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>WriterAI needs to send Apple events to simulate keyboard shortcuts and control text.</string>
     <key>NSAppTransportSecurity</key>
     <dict>
         <key>NSAllowsLocalNetworking</key>
@@ -30,5 +32,16 @@
     </dict>
     <key>NSLocalNetworkUsageDescription</key>
     <string>WriterAI needs to access the local network to communicate with the Rust backend service.</string>
+    <key>HotkeyConfiguration</key>
+    <dict>
+        <key>ModifierFlags</key>
+        <string>control,shift</string>
+        <key>KeyCode</key>
+        <integer>45</integer>
+        <key>KeyName</key>
+        <string>N</string>
+        <key>HotkeyDisplayName</key>
+        <string>⇧⌃N (Shift+Control+N)</string>
+    </dict>
 </dict>
 </plist>
