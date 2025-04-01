@@ -1,0 +1,28 @@
+port = 8989
+llm_url = "http://localhost:11434/api/chat"
+model_name = "qwen2.5:7b-instruct-q6_K"
+
+[llm_params]
+temperature = 1
+max_output_tokens = 2048
+top_p = 1
+
+# Prompt template for improving text
+prompt_template = """Improve the provided text input for clarity, grammar, and overall communication, ensuring it's fluently expressed in English without altering IT-specific slang or abbreviations. Maintain all IT terms and abbreviations in their original form (e.g., Prod, VPC).
+
+# Steps
+
+1. **Identify Errors**: Examine the input text for grammatical, spelling, and punctuation errors.
+2. **Improve Clarity**: Rephrase sentences to improve clarity and flow while maintaining the original meaning.
+3. **Ensure Fluency**: Adjust the text to sound natural and fluent in English.
+4. **Check Consistency**: Ensure the tone remains consistent throughout the text.
+5. **Produce Improved Text**: Deliver the revised version focusing on correctness and readability.
+6. **Review Changes:** Ensure that the revised text maintains the intended meaning and that IT terms are unchanged.
+
+# Output Format
+
+- Provide a single improved version of the input text as a plain sentence or paragraph.
+- Do not include the original text in the response.
+
+{{input}}
+"""
