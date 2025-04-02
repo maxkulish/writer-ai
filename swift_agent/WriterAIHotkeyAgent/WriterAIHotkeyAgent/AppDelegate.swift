@@ -8,6 +8,8 @@
 import AppKit
 import Foundation
 import UserNotifications
+import ServiceManagement
+import os.log
 
 class AppDelegate: NSObject, NSApplicationDelegate {
     
@@ -15,19 +17,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     // Read port from Rust config or use default. Best to match default.
     // Using explicit IP address instead of localhost to avoid DNS resolution issues in sandbox
-    private let rustServiceUrl = URL(string: "http://127.0.0.1:8989/process")!
+    private let rustServiceUrl: URL = {
+        guard let url = URL(string: "http://127.0.0.1:8989/process") else {
+            // This should never fail for a hardcoded, valid URL, but we'll handle it gracefully
+            fatalError("Failed to create URL for Rust service: Invalid URL format")
+        }
+        return url
+    }()
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        print("WriterAI Hotkey Agent started.")
+        // Set up logging
+        let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.writer-ai.WriterAIHotkeyAgent", category: "startup")
+        logger.info("WriterAI Hotkey Agent started.")
         
         // Disable debug settings
         UserDefaults.standard.removeObject(forKey: "UseAppleScriptForPaste")
         UserDefaults.standard.removeObject(forKey: "UseTestMode")
         UserDefaults.standard.removeObject(forKey: "ProvideTestContentOnFailure")
         
-        // Set the application dock icon programmatically 
-        if let appImage = NSImage(named: "AppIcon") {
-            NSApp.applicationIconImage = appImage
+        // Handle agent mode by relaunching if needed
+        setupAgentMode()
+        
+        // Make sure app is completely hidden from Dock and app switcher
+        // Use a safer approach to setting activation policy
+        DispatchQueue.main.async {
+            // Set activation policy to completely hide from Dock and Cmd+Tab
+            NSApplication.shared.setActivationPolicy(.prohibited)
+            ProcessInfo.processInfo.automaticTerminationSupportEnabled = true
         }
         
         // Check if we were recently restarted - if so, skip immediate accessibility check
@@ -72,7 +88,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     let response = alert.runModal()
                     if response == .alertFirstButtonReturn {
                         // Open the accessibility settings
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+                            NSWorkspace.shared.open(url)
+                        }
                     }
                 }
             }
@@ -116,7 +134,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask) // Isolate relevant flags
 
         // Only print key presses with modifiers for basic monitoring
-        if event.keyCode == keyCode && requiredFlags.contains { flag in flags.contains(flag) } {
+        if event.keyCode == keyCode && requiredFlags.contains(where: { flag in flags.contains(flag) }) {
             print("\(keyName) Key Pressed with modifiers - \(hotkeyConfig.modifierFlags.map { "\($0): \(flags.contains($0))" }.joined(separator: ", "))")
         }
 
@@ -144,22 +162,137 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     // This function has been intentionally removed as part of the simplification process
     // The functionality is now handled by the simplified setupHotkeyMonitor() function
     
+    // MARK: - Agent Mode & Process Management
+    
+    private func setupAgentMode() {
+        // Check if we're already running in agent mode
+        // If Info.plist is configured correctly with LSUIElement, this should always be true
+        let isAgent = ProcessInfo.processInfo.environment["LSUIElement"] == "1" || 
+                      UserDefaults.standard.bool(forKey: "ForceAgentMode")
+        
+        if isAgent {
+            print("Running in agent mode")
+        } else {
+            print("Note: App was launched without agent flag. Using native app mode.")
+            // We'll set activation policy in applicationDidFinishLaunching instead of relaunching
+            UserDefaults.standard.set(true, forKey: "ForceAgentMode")
+        }
+    }
+    
+    // MARK: - Login Item Management
+    
+    @objc private func toggleLoginItemSetting(_ sender: NSMenuItem) {
+        let isLoginItemEnabled = sender.state == .on
+        
+        // Toggle the state
+        if isLoginItemEnabled {
+            // Currently enabled, so disable it
+            disableLoginItem()
+            sender.state = .off
+        } else {
+            // Currently disabled, so enable it
+            enableLoginItem()
+            sender.state = .on
+        }
+    }
+    
+    private func enableLoginItem() {
+        if #available(macOS 13.0, *) {
+            // Modern method using SMAppService
+            do {
+                let loginItem = SMAppService.loginItem(identifier: Bundle.main.bundleIdentifier!)
+                if loginItem.status == .enabled {
+                    print("Login item is already enabled")
+                } else {
+                    try loginItem.register()
+                    print("Successfully registered login item")
+                }
+            } catch {
+                print("Failed to register login item: \(error)")
+                showErrorNotification(title: "Autostart Setup Failed", message: "Could not enable automatic startup: \(error.localizedDescription)")
+            }
+        } else {
+            // Fallback for older macOS versions - use AppleScript
+            let script = """
+            tell application "System Events"
+                make login item at end with properties {path:"\(Bundle.main.bundlePath)", hidden:true}
+            end tell
+            """
+            var error: NSDictionary?
+            NSAppleScript(source: script)?.executeAndReturnError(&error)
+            
+            if let error = error {
+                print("Failed to enable login item: \(error)")
+                showErrorNotification(title: "Autostart Setup Failed", message: "Could not enable automatic startup")
+            } else {
+                print("Successfully enabled login item using AppleScript")
+            }
+        }
+    }
+    
+    private func disableLoginItem() {
+        if #available(macOS 13.0, *) {
+            // Modern method using SMAppService
+            do {
+                let loginItem = SMAppService.loginItem(identifier: Bundle.main.bundleIdentifier!)
+                try loginItem.unregister()
+                print("Successfully unregistered login item")
+            } catch {
+                print("Failed to unregister login item: \(error)")
+                showErrorNotification(title: "Autostart Removal Failed", message: "Could not disable automatic startup: \(error.localizedDescription)")
+            }
+        } else {
+            // Fallback for older macOS versions - use AppleScript
+            let script = """
+            tell application "System Events"
+                delete (every login item whose path contains "\(Bundle.main.bundlePath)")
+            end tell
+            """
+            var error: NSDictionary?
+            NSAppleScript(source: script)?.executeAndReturnError(&error)
+            
+            if let error = error {
+                print("Failed to disable login item: \(error)")
+                showErrorNotification(title: "Autostart Removal Failed", message: "Could not disable automatic startup")
+            } else {
+                print("Successfully disabled login item using AppleScript")
+            }
+        }
+    }
+    
+    private func isLoginItemEnabled() -> Bool {
+        if #available(macOS 13.0, *) {
+            // Modern method using SMAppService
+            let loginItem = SMAppService.loginItem(identifier: Bundle.main.bundleIdentifier!)
+            return loginItem.status == .enabled
+        } else {
+            // For older macOS versions, we can check via AppleScript
+            let script = """
+            tell application "System Events"
+                return exists (every login item whose path contains "\(Bundle.main.bundlePath)")
+            end tell
+            """
+            var error: NSDictionary?
+            let result = NSAppleScript(source: script)?.executeAndReturnError(&error)
+            return result?.booleanValue ?? false
+        }
+    }
+    
     // MARK: - Status Menu
     
     private func createStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         
-        // Set the image for the status item using our custom icon
+        // Set the status item to show "W" as text with custom styling
         if let button = statusItem?.button {
-            if let dockImage = NSImage(named: "DockIcon") {
-                // Size the icon appropriately for the status bar (16x16 or 18x18)
-                let newSize = NSSize(width: 18, height: 18)
-                button.image = dockImage
-                button.image?.size = newSize
-            } else {
-                // Fallback to a text emoji if the image isn't available
-                button.title = "⌨️"
-            }
+            // Use a text-based icon (capital W for Writer)
+            button.title = "W"
+            
+            // Apply custom font and styling
+            button.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+            
+            // Set accessibility description for the button
+            button.setAccessibilityLabel("WriterAI")
         }
         
         // Create the menu
@@ -205,6 +338,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         menu.addItem(NSMenuItem.separator())
         
+        // Add a login item toggle
+        let loginItemEnabled = isLoginItemEnabled()
+        let loginItemToggle = NSMenuItem(title: "Launch at Login", action: #selector(toggleLoginItemSetting(_:)), keyEquivalent: "l")
+        loginItemToggle.target = self
+        loginItemToggle.state = loginItemEnabled ? .on : .off
+        menu.addItem(loginItemToggle)
+        
+        menu.addItem(NSMenuItem.separator())
+        
         // Add a quit item
         let quitItem = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)
@@ -222,25 +364,39 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func openAccessibilitySettings(_ sender: Any?) {
         // Try to open the security preferences directly to the accessibility pane
-        let accessibilityURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
-        if NSWorkspace.shared.open(accessibilityURL) {
-            print("Opened System Settings > Privacy & Security > Accessibility")
+        if let accessibilityURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            if NSWorkspace.shared.open(accessibilityURL) {
+                print("Opened System Settings > Privacy & Security > Accessibility")
+            } else {
+                // Fallback to opening Security & Privacy in general
+                if let securityURL = URL(string: "x-apple.systempreferences:com.apple.preference.security") {
+                    NSWorkspace.shared.open(securityURL)
+                    print("Opened System Settings > Privacy & Security")
+                } else {
+                    print("Failed to open System Settings")
+                }
+            }
         } else {
-            // Fallback to opening Security & Privacy in general
-            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security")!)
-            print("Opened System Settings > Privacy & Security")
+            print("Failed to create preferences URL")
         }
     }
     
     @objc private func openAutomationSettings(_ sender: Any?) {
         // Try to open the security preferences directly to the automation pane
-        let automationURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!
-        if NSWorkspace.shared.open(automationURL) {
-            print("Opened System Settings > Privacy & Security > Automation")
+        if let automationURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+            if NSWorkspace.shared.open(automationURL) {
+                print("Opened System Settings > Privacy & Security > Automation")
+            } else {
+                // Fallback to opening Security & Privacy in general
+                if let securityURL = URL(string: "x-apple.systempreferences:com.apple.preference.security") {
+                    NSWorkspace.shared.open(securityURL)
+                    print("Opened System Settings > Privacy & Security")
+                } else {
+                    print("Failed to open System Settings")
+                }
+            }
         } else {
-            // Fallback to opening Security & Privacy in general
-            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security")!)
-            print("Opened System Settings > Privacy & Security")
+            print("Failed to create preferences URL")
         }
     }
     
@@ -269,7 +425,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let sessionConfig = URLSessionConfiguration.default
             sessionConfig.timeoutIntervalForRequest = 30.0  // 30 seconds timeout
             sessionConfig.waitsForConnectivity = true      // Wait for connectivity if not available
-            let session = URLSession(configuration: sessionConfig)
+            // Session is used implicitly by sendToRustService
             
             // Send text directly to service to test connection
             self.sendToRustService(text: text) { result in
@@ -422,7 +578,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         self.openAccessibilitySettings(nil)
                     } else if response == .alertSecondButtonReturn {
                         // Open Automation settings
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!)
+                        self.openAutomationSettings(nil)
                     } else if response == .alertThirdButtonReturn {
                         NSApp.terminate(nil)
                     }
@@ -442,7 +598,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     let response = alert.runModal()
                     if response == .alertFirstButtonReturn {
                         // Open Automation settings
-                        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!)
+                        self.openAutomationSettings(nil)
                     } else if response == .alertSecondButtonReturn {
                         self.restartApp(nil)
                     }
@@ -453,7 +609,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     @objc private func restartApp(_ sender: Any?) {
         // Get the path to the current executable
-        let executablePath = Bundle.main.executablePath!
+        guard let executablePath = Bundle.main.executablePath else {
+            print("ERROR: Could not get executable path")
+            return
+        }
         
         // Set a flag to indicate this is a restart to avoid permission check loop
         UserDefaults.standard.set(true, forKey: "WasRecentlyRestarted")
@@ -489,7 +648,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         isHandlingHotkey = true
         
         // Reset flag after a reasonable timeout even if processing fails
-        let resetTimer = DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5.0) { [weak self] in
             self?.isHandlingHotkey = false
         }
         
@@ -820,7 +979,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         
                         let response = alert.runModal()
                         if response == .alertFirstButtonReturn {
-                            NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!)
+                            self.openAccessibilitySettings(nil)
                         }
                     }
                     

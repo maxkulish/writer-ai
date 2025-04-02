@@ -11,7 +11,20 @@ import SwiftUI
 struct WriterAIHotkeyAgentApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     
+    init() {
+        // Don't try to set activation policy at init time
+        // This will be handled in the AppDelegate instead
+    }
+    
     var body: some Scene {
-        Settings { EmptyView() } // No visible windows needed
+        Settings { 
+            EmptyView() 
+        }
+        .commands {
+            // Remove standard menu items
+            CommandGroup(replacing: .appInfo) {}
+            CommandGroup(replacing: .newItem) {}
+            CommandGroup(replacing: .help) {}
+        }
     }
 }
