@@ -5,14 +5,16 @@ on:
     tags:
       - 'v*'
 
+# These permissions are needed for the GitHub token
 permissions:
-  contents: write  # This is crucial for release creation
+  contents: write      # Required for creating releases and uploading assets
+  discussions: write   # Optional: if you want to create discussions
+  issues: write        # Optional: if you want to interact with issues
+  pull-requests: write # Optional: if you want to interact with pull requests
 
 jobs:
   create-release:
     runs-on: ubuntu-latest
-    outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -20,6 +22,8 @@ jobs:
       - name: Create GitHub Release
         id: create_release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           generate_release_notes: true
           draft: false
@@ -81,5 +85,7 @@ jobs:
 
       - name: Upload binaries to release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           files: release-artifacts/${{ matrix.asset_name }}
