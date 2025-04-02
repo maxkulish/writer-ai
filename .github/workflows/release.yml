@@ -65,9 +65,8 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target ${{ matrix.target }}
+          args: --release --target ${{ matrix.target }} --manifest-path=./rust_service/Cargo.toml
           use-cross: ${{ runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu' }}
-        working-directory: ./rust_service
 
       - name: Prepare artifact
         shell: bash
