@@ -20,6 +20,25 @@ WriterAI is a productivity tool that enhances your writing with LLM assistance. 
 4. Open WriterAI from your Applications folder
 5. When prompted, grant Accessibility permissions in System Settings
 
+### Download Prebuilt Binaries
+
+You can download just the Rust service binary from the [GitHub Releases](https://github.com/your-username/writer-ai/releases) page:
+
+1. Choose the appropriate binary for your platform:
+   - `writer_ai_rust_service-macos-arm64` - for Apple Silicon (M1/M2) Macs
+   - `writer_ai_rust_service-macos-intel` - for Intel Macs
+   - `writer_ai_rust_service-linux-amd64` - for Linux systems
+
+2. Make the binary executable:
+   ```bash
+   chmod +x writer_ai_rust_service-*
+   ```
+
+3. Move it to a location in your PATH:
+   ```bash
+   sudo mv writer_ai_rust_service-* /usr/local/bin/writer_ai_rust_service
+   ```
+
 ### Building from Source
 
 #### Prerequisites
