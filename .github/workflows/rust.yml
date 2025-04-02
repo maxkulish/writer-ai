@@ -39,7 +39,7 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('rust_service/Cargo.lock') }}
           
       - name: Run tests
-        run: cargo test --manifest-path=rust_service/Cargo.toml
+        run: cargo test
   
   build:
     name: Build Binary
@@ -77,7 +77,7 @@ jobs:
         run: rustup target add aarch64-apple-darwin
       
       - name: Build release binary
-        run: cargo build --release --target ${{ matrix.target }} --manifest-path=rust_service/Cargo.toml
+        run: cargo build --release --target ${{ matrix.target }}
       
       - name: Prepare binary
         run: |
