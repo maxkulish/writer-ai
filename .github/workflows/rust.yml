@@ -16,6 +16,9 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./rust_service
     steps:
       - uses: actions/checkout@v3
       
@@ -32,18 +35,22 @@ jobs:
           path: |
             ~/.cargo/registry
             ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+            rust_service/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('rust_service/Cargo.lock') }}
           
       - name: Run tests
         uses: actions-rs/cargo@v1
         with:
           command: test
+          args: --manifest-path=rust_service/Cargo.toml
   
   build:
     name: Build Binary
     needs: test
     runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ./rust_service
     strategy:
       matrix:
         include:
@@ -76,14 +83,14 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --release --target ${{ matrix.target }}
+          args: --release --target ${{ matrix.target }} --manifest-path=rust_service/Cargo.toml
       
       - name: Prepare binary
         run: |
           if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            cp target/${{ matrix.target }}/release/writer_ai_rust_service.exe ${{ matrix.name }}.exe
+            cp target/${{ matrix.target }}/release/writer_ai_rust_service.exe ../${{ matrix.name }}.exe
           else
-            cp target/${{ matrix.target }}/release/writer_ai_rust_service ${{ matrix.name }}
+            cp target/${{ matrix.target }}/release/writer_ai_rust_service ../${{ matrix.name }}
           fi
       
       - name: Upload artifact
