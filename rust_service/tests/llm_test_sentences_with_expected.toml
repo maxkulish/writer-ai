@@ -78,3 +78,13 @@ expected = "Prod is on fire. PagerDuty went off 3 times already"
 id = "it-slang-005"
 text = "Looks like a classic PEBKAC — user was in the wrong VPC :)"
 expected = "It appears to be a classic PEBKAC issue — the user was in the wrong VPC :)"
+
+[[sentences]]
+id = "it-slang-006"
+text = "The system is down. We need to reboot it"
+expected = "The system is down. We need to reboot it"
+
+[[sentences]]
+id = "simplification-01"
+text = "It's better to discuss it tomorrow, baby is on my hands"
+expected = "Let's talk about it tomorrow. I'm holding the baby right now"
