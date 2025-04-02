@@ -9,14 +9,78 @@ permissions:
   contents: write  # This is crucial for release creation
 
 jobs:
-  release:
+  create-release:
     runs-on: ubuntu-latest
+    outputs:
+      upload_url: ${{ steps.create_release.outputs.upload_url }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         
       - name: Create GitHub Release
+        id: create_release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           draft: false
+          name: Release ${{ github.ref_name }}
+
+  build-and-upload:
+    needs: create-release
+    name: Build for ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            binary_name: writer_ai_rust_service
+            asset_name: writer_ai_rust_service-linux-amd64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            binary_name: writer_ai_rust_service
+            asset_name: writer_ai_rust_service-macos-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            binary_name: writer_ai_rust_service
+            asset_name: writer_ai_rust_service-macos-arm64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            binary_name: writer_ai_rust_service.exe
+            asset_name: writer_ai_rust_service-windows-amd64.exe
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: actions-rs/toolchain@v1
+        with:
+          profile: minimal
+          toolchain: stable
+          target: ${{ matrix.target }}
+          override: true
+
+      - name: Build release binary
+        uses: actions-rs/cargo@v1
+        with:
+          command: build
+          args: --release --target ${{ matrix.target }}
+          use-cross: ${{ runner.os == 'Linux' && matrix.target != 'x86_64-unknown-linux-gnu' }}
+        working-directory: ./rust_service
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p release-artifacts
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "rust_service/target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "release-artifacts/${{ matrix.asset_name }}"
+          else
+            cp "rust_service/target/${{ matrix.target }}/release/${{ matrix.binary_name }}" "release-artifacts/${{ matrix.asset_name }}"
+            chmod +x "release-artifacts/${{ matrix.asset_name }}"
+          fi
+
+      - name: Upload binaries to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-artifacts/${{ matrix.asset_name }}
