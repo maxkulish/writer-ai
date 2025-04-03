@@ -45,23 +45,64 @@ jobs:
       - name: Package app with Rust service
         run: ./package_app.sh
         
-      - name: Create DMG
+      - name: Prepare App Bundle
         run: |
-          # Always create the DMG file to ensure it's properly generated
-          echo "Creating DMG file..."
-          if [ -d "./release/WriterAIHotkeyAgent.app" ] && [ ! -d "./release/WriterAI.app" ]; then
-            echo "Renaming WriterAIHotkeyAgent.app to WriterAI.app..."
-            mv "./release/WriterAIHotkeyAgent.app" "./release/WriterAI.app"
-          fi
+          echo "Preparing app bundle for DMG creation..."
+          mkdir -p "./release"
           
-          if [ -d "./release/WriterAI.app" ]; then
-            echo "Creating DMG from WriterAI.app..."
-            hdiutil create -volname "WriterAI" -srcfolder "./release/WriterAI.app" -ov -format UDZO "./release/WriterAI.dmg"
-          else
-            echo "Error: No app found in release directory to create DMG"
-            ls -la ./release/
+          # Find the built app
+          BUILT_APP=$(find ~/Library/Developer/Xcode/DerivedData -name "WriterAIHotkeyAgent.app" -type d -path "*/Build/Products/Release/*" | head -n 1)
+          
+          if [ -z "$BUILT_APP" ]; then
+            echo "Error: Could not find built app"
+            find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d
             exit 1
           fi
+          
+          echo "Found built app at: $BUILT_APP"
+          
+          # Make sure the release directory is clean
+          rm -rf "./release/WriterAI.app" "./release/WriterAIHotkeyAgent.app"
+          
+          # Copy the built app to the release directory
+          cp -R "$BUILT_APP" "./release/WriterAI.app"
+          
+          # Verify the app was copied
+          if [ ! -d "./release/WriterAI.app" ]; then
+            echo "Error: Failed to copy app to release directory"
+            ls -la "./release/"
+            exit 1
+          fi
+          
+          # Add Rust service to the app bundle
+          mkdir -p "./release/WriterAI.app/Contents/Resources/rust_service"
+          cp "./rust_service/target/universal-apple-darwin/release/writer_ai_rust_service" "./release/WriterAI.app/Contents/Resources/rust_service/"
+          
+          echo "App bundle prepared successfully"
+          ls -la "./release/WriterAI.app/Contents/Resources/rust_service/"
+      
+      - name: Create DMG
+        run: |
+          echo "Creating DMG file..."
+          
+          # Ensure the app exists
+          if [ ! -d "./release/WriterAI.app" ]; then
+            echo "Error: WriterAI.app not found in release directory"
+            ls -la "./release/"
+            exit 1
+          fi
+          
+          # Create the DMG
+          hdiutil create -volname "WriterAI" -srcfolder "./release/WriterAI.app" -ov -format UDZO "./release/WriterAI.dmg"
+          
+          # Verify the DMG was created
+          if [ ! -f "./release/WriterAI.dmg" ]; then
+            echo "Error: Failed to create DMG file"
+            exit 1
+          fi
+          
+          echo "DMG created successfully at ./release/WriterAI.dmg"
+          ls -la "./release/"
           
       - name: Upload DMG to GitHub Release
         uses: softprops/action-gh-release@v2
