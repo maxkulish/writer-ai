@@ -86,9 +86,107 @@ echo -e "${BLUE}Cleaning up...${NC}"
 hdiutil detach "$MOUNT_POINT" -quiet
 rm -rf "${TMP_DIR}"
 
+# Set up configuration directory and files
+CONFIG_DIR="${HOME}/.config/writer_ai_service"
+echo -e "${BLUE}Setting up configuration directory at ${CONFIG_DIR}...${NC}"
+mkdir -p "${CONFIG_DIR}"
+
+# Create default configuration file if it doesn't exist
+if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
+  echo -e "${BLUE}Creating default configuration file...${NC}"
+  # Check if Ollama is installed
+  if command -v ollama &> /dev/null; then
+    echo -e "${GREEN}Ollama found, using local LLM configuration${NC}"
+    cat > "${CONFIG_DIR}/config.toml" << 'EOT'
+# WriterAI Ollama Configuration
+port = 8989
+llm_url = "http://localhost:11434/api/chat"
+# You can change the model to any model available in your Ollama installation
+model_name = "mistral:latest"
+
+# Optional params for model behavior
+[llm_params]
+temperature = 0.7
+max_output_tokens = 2048
+top_p = 1
+
+# Prompt template for improving text
+prompt_template = """Improve the provided text input for clarity, grammar, and overall communication, ensuring it's fluently expressed in English.
+
+# Steps
+
+1. **Identify Errors**: Examine the input text for grammatical, spelling, and punctuation errors.
+2. **Improve Clarity**: Rephrase sentences to improve clarity and flow while maintaining the original meaning.
+3. **Ensure Fluency**: Adjust the text to sound natural and fluent in English.
+4. **Check Consistency**: Ensure the tone remains consistent throughout the text.
+5. **Produce Improved Text**: Deliver the revised version focusing on correctness and readability.
+
+# Output Format
+
+- Provide a single improved version of the input text as a plain sentence or paragraph.
+- Do not include the original text in the response.
+
+{{input}}
+"""
+EOT
+  else
+    echo -e "${YELLOW}Ollama not found, using OpenAI configuration template${NC}"
+    echo -e "${YELLOW}You'll need to edit ${CONFIG_DIR}/config.toml to add your OpenAI API key${NC}"
+    cat > "${CONFIG_DIR}/config.toml" << 'EOT'
+# WriterAI OpenAI Configuration
+port = 8989
+llm_url = "https://api.openai.com/v1/responses"
+model_name = "gpt-4o"
+
+# Authentication for OpenAI API
+# Replace with your actual API key
+openai_api_key = "YOUR_OPENAI_API_KEY_HERE"
+# openai_org_id = "YOUR_ORGANIZATION_ID" # Optional 
+
+# Optional params for model behavior
+[llm_params]
+temperature = 0.7
+max_output_tokens = 2048
+top_p = 1
+
+# Prompt template for improving text
+prompt_template = """Improve the provided text input for clarity, grammar, and overall communication, ensuring it's fluently expressed in English.
+
+# Steps
+
+1. **Identify Errors**: Examine the input text for grammatical, spelling, and punctuation errors.
+2. **Improve Clarity**: Rephrase sentences to improve clarity and flow while maintaining the original meaning.
+3. **Ensure Fluency**: Adjust the text to sound natural and fluent in English.
+4. **Check Consistency**: Ensure the tone remains consistent throughout the text.
+5. **Produce Improved Text**: Deliver the revised version focusing on correctness and readability.
+
+# Output Format
+
+- Provide a single improved version of the input text as a plain sentence or paragraph.
+- Do not include the original text in the response.
+
+{{input}}
+"""
+EOT
+  fi
+fi
+
+# Copy the Rust service to a user-accessible location
+echo -e "${BLUE}Installing Rust service...${NC}"
+RUST_SERVICE="${MOUNT_POINT}/WriterAI.app/Contents/Resources/rust_service/writer_ai_rust_service"
+BIN_DIR="${HOME}/.local/bin"
+mkdir -p "${BIN_DIR}"
+cp "${RUST_SERVICE}" "${BIN_DIR}/"
+chmod +x "${BIN_DIR}/writer_ai_rust_service"
+
 echo -e "${GREEN}WriterAI has been successfully installed to ${INSTALL_DIR}/WriterAI.app${NC}"
+echo -e "${GREEN}Rust service installed to ${BIN_DIR}/writer_ai_rust_service${NC}"
+echo -e "${GREEN}Configuration file created at ${CONFIG_DIR}/config.toml${NC}"
 echo -e "${YELLOW}Note: When opening the app for the first time, you may need to go to System Preferences > Security & Privacy and click 'Open Anyway'${NC}"
 echo -e "${BLUE}Starting WriterAI...${NC}"
 open "${INSTALL_DIR}/WriterAI.app"
+
+echo -e "${BLUE}Starting Rust service...${NC}"
+"${BIN_DIR}/writer_ai_rust_service" &
 
 exit 0

@@ -13,10 +13,11 @@ WriterAI is a productivity tool that enhances your writing with LLM assistance. 
 ## Features
 
 - Runs quietly in the background with minimal resource usage
-- Responds to customizable keyboard shortcuts (default: Shift+Control+N)
+- Responds to customizable keyboard shortcuts (default: Shift+Control+E)
 - Seamlessly processes selected text and replaces it with improved content
 - Supports multiple LLM backends through the Rust service
-- Maintains privacy by processing text locally when using local LLMs
+- Maintains privacy by processing text locally when using local LLMs like Ollama
+- Works with OpenAI models for top-quality text improvements
 
 ## Installation
 
@@ -118,18 +119,49 @@ You can download just the Rust service binary from the [GitHub Releases](https:/
 1. Start WriterAI from your Applications folder
 2. Grant the necessary permissions when prompted
 3. Select text in any application
-4. Press the hotkey (default: Shift+Control+N)
+4. Press the hotkey (default: Shift+Control+E)
 5. Wait for the text to be processed and replaced with improved content
 
 ## Configuration
 
 ### Hotkey Configuration
 
-The default hotkey is Shift+Control+N. You can customize it by editing the `Info.plist` file. For more information, see [Hotkey Configuration Guide](docs/hotkey_configuration.md).
+The default hotkey is **Shift+Control+E** (previously was Shift+Control+N, but changed to avoid conflicts with system commands). You can customize it by editing the `Info.plist` file. For more information, see [Hotkey Configuration Guide](docs/hotkey_configuration.md).
 
-### LLM Configuration
+### Rust Service and LLM Configuration
 
-WriterAI supports various LLM backends through its Rust service. Configuration files for different models are provided in the `rust_service/tests/config_files` directory.
+WriterAI uses a Rust service to connect to LLM backends. The service needs to be running for the app to work.
+
+After installation, the Rust service is automatically configured and started. Configuration files are created at:
+```
+~/.config/writer_ai_service/config.toml
+```
+
+#### Using Local LLMs (Ollama)
+
+If you have [Ollama](https://ollama.ai/) installed, WriterAI will detect it and configure itself to use your local LLMs.
+
+1. Make sure Ollama is running: `ollama serve`
+2. Pull the model you want to use (if not already downloaded): `ollama pull mistral:latest`
+3. The default configuration uses `mistral:latest` but you can edit the config to use any model available in your Ollama installation
+
+#### Using OpenAI Models
+
+To use OpenAI models:
+
+1. Edit the config file: `~/.config/writer_ai_service/config.toml`
+2. Add your OpenAI API key: `openai_api_key = "sk-your-actual-api-key"`
+3. Restart the Rust service: 
+   ```bash
+   pkill writer_ai_rust_service
+   ~/.local/bin/writer_ai_rust_service &
+   ```
+
+#### Manual Control of the Rust Service
+
+- Start: `~/.local/bin/writer_ai_rust_service`
+- Check status: `ps aux | grep writer_ai_rust_service`
+- Stop: `pkill writer_ai_rust_service`
 
 ## Contributing
 

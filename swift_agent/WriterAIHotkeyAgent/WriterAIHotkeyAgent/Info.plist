@@ -61,11 +61,11 @@
         <key>ModifierFlags</key>
         <string>control,shift</string>
         <key>KeyCode</key>
-        <integer>45</integer>
+        <integer>14</integer>
         <key>KeyName</key>
-        <string>N</string>
+        <string>E</string>
         <key>HotkeyDisplayName</key>
-        <string>⇧⌃N (Shift+Control+N)</string>
+        <string>⇧⌃E (Shift+Control+E)</string>
     </dict>
 </dict>
 </plist>
