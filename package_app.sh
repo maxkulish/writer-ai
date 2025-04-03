@@ -111,7 +111,8 @@ else
             "./DerivedData/Build/Products/Release/${APP_NAME}" \
             "${APP_DIR}/DerivedData/Build/Products/Release/${APP_NAME}" \
             "${APP_DIR}/build/Release/${APP_NAME}" \
-            "$(xcodebuild -project ${APP_DIR}/WriterAIHotkeyAgent.xcodeproj -showBuildSettings 2>/dev/null | grep -m 1 "BUILT_PRODUCTS_DIR" | awk '{print $3}')/${APP_NAME}"
+            "$(xcodebuild -project ${APP_DIR}/WriterAIHotkeyAgent.xcodeproj -showBuildSettings 2>/dev/null | grep -m 1 "BUILT_PRODUCTS_DIR" | awk '{print $3}')/${APP_NAME}" \
+            "$(find ~/Library/Developer/Xcode/DerivedData -name "WriterAIHotkeyAgent.app" -type d -path "*/Build/Products/Release/*" | head -n 1)"
         do
             if [ -d "${alt_path}" ]; then
                 echo "Found app at: ${alt_path}"
@@ -162,7 +163,23 @@ if [ "$USE_MANUAL_BUILD" = true ] && [ ! -d "$PREBUILT_APP" ]; then
     echo "4. Run this script again to package everything"
 else
     echo "Creating DMG..."
-    hdiutil create -volname "WriterAI" -srcfolder "${RELEASE_DIR}/${APP_NAME}" -ov -format UDZO "${RELEASE_DIR}/WriterAI.dmg"
+    # Check which app exists in the release directory
+    REAL_APP_PATH=""
+    if [ -d "${RELEASE_DIR}/${APP_NAME}" ]; then
+        REAL_APP_PATH="${RELEASE_DIR}/${APP_NAME}"
+    elif [ -d "${RELEASE_DIR}/WriterAIHotkeyAgent.app" ]; then
+        REAL_APP_PATH="${RELEASE_DIR}/WriterAIHotkeyAgent.app"
+        # Rename the app to match expected name
+        mv "${RELEASE_DIR}/WriterAIHotkeyAgent.app" "${RELEASE_DIR}/${APP_NAME}"
+        REAL_APP_PATH="${RELEASE_DIR}/${APP_NAME}"
+    fi
+    
+    if [ -z "$REAL_APP_PATH" ]; then
+        echo "Error: No app found in ${RELEASE_DIR} to create DMG"
+        exit 1
+    fi
+    
+    hdiutil create -volname "WriterAI" -srcfolder "${REAL_APP_PATH}" -ov -format UDZO "${RELEASE_DIR}/WriterAI.dmg"
 
     echo "===== Build Complete ====="
     echo "Application is ready at: ${RELEASE_DIR}/${APP_NAME}"

@@ -1,0 +1,74 @@
+name: Swift App Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# These permissions are needed for the GitHub token
+permissions:
+  contents: write      # Required for creating releases and uploading assets
+
+jobs:
+  build-macos-app:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        
+      - name: Set up Xcode
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+          
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-apple-darwin,aarch64-apple-darwin
+          
+      - name: Build universal Rust binary
+        working-directory: ./rust_service
+        run: |
+          cargo build --release --target x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin
+          mkdir -p target/universal-apple-darwin/release
+          lipo -create \
+            target/x86_64-apple-darwin/release/writer_ai_rust_service \
+            target/aarch64-apple-darwin/release/writer_ai_rust_service \
+            -output target/universal-apple-darwin/release/writer_ai_rust_service
+      
+      - name: Build Swift app
+        run: |
+          cd swift_agent/WriterAIHotkeyAgent
+          xcodebuild -project WriterAIHotkeyAgent.xcodeproj -scheme WriterAIHotkeyAgent -configuration Release -destination 'platform=macOS' clean build
+          
+      - name: Package app with Rust service
+        run: ./package_app.sh
+        
+      - name: Create DMG
+        run: |
+          # Always create the DMG file to ensure it's properly generated
+          echo "Creating DMG file..."
+          if [ -d "./release/WriterAIHotkeyAgent.app" ] && [ ! -d "./release/WriterAI.app" ]; then
+            echo "Renaming WriterAIHotkeyAgent.app to WriterAI.app..."
+            mv "./release/WriterAIHotkeyAgent.app" "./release/WriterAI.app"
+          fi
+          
+          if [ -d "./release/WriterAI.app" ]; then
+            echo "Creating DMG from WriterAI.app..."
+            hdiutil create -volname "WriterAI" -srcfolder "./release/WriterAI.app" -ov -format UDZO "./release/WriterAI.dmg"
+          else
+            echo "Error: No app found in release directory to create DMG"
+            ls -la ./release/
+            exit 1
+          fi
+          
+      - name: Upload DMG to GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
+        with:
+          files: ./release/WriterAI.dmg
+          draft: false
+          generate_release_notes: true
+          name: Release ${{ github.ref_name }}
