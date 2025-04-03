@@ -145,9 +145,14 @@ mkdir -p "${RESOURCES_DIR}/rust_service"
 cp "${RUST_BIN}" "${RESOURCES_DIR}/rust_service/"
 cp "${RUST_SERVICE_DIR}/config.toml" "${RESOURCES_DIR}/rust_service/" 2>/dev/null || echo "No config.toml found, using defaults"
 
-# Copy the app to the release directory
+# Copy the app to the release directory if paths are different
 echo "Copying app to release directory..."
-cp -R "${APP_PATH}" "${RELEASE_DIR}/"
+if [[ "$APP_PATH" != "${RELEASE_DIR}/${APP_NAME}" ]]; then
+    rm -rf "${RELEASE_DIR}/${APP_NAME}"  # Remove any existing app first
+    cp -R "${APP_PATH}" "${RELEASE_DIR}/"
+else
+    echo "App is already in release directory, no need to copy"
+fi
 
 # Create a DMG for distribution if the app was fully built
 if [ "$USE_MANUAL_BUILD" = true ] && [ ! -d "$PREBUILT_APP" ]; then
