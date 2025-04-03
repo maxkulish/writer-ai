@@ -173,11 +173,51 @@ fi
 
 # Copy the Rust service to a user-accessible location
 echo -e "${BLUE}Installing Rust service...${NC}"
-RUST_SERVICE="${MOUNT_POINT}/WriterAI.app/Contents/Resources/rust_service/writer_ai_rust_service"
+RUST_SERVICE_APP="${INSTALL_DIR}/WriterAI.app/Contents/Resources/rust_service/writer_ai_rust_service"
 BIN_DIR="${HOME}/.local/bin"
 mkdir -p "${BIN_DIR}"
-cp "${RUST_SERVICE}" "${BIN_DIR}/"
-chmod +x "${BIN_DIR}/writer_ai_rust_service"
+
+# Download the Rust service directly from GitHub release assets
+echo -e "${BLUE}Downloading Rust service from GitHub release...${NC}"
+
+# Determine which binary to download based on architecture
+ARCH=$(uname -m)
+OS=$(uname -s)
+
+if [ "$OS" = "Darwin" ]; then
+  # macOS binaries
+  if [ "$ARCH" = "arm64" ]; then
+    RUST_BIN_NAME="writer_ai_rust_service-macos-arm64"
+  elif [ "$ARCH" = "x86_64" ]; then
+    RUST_BIN_NAME="writer_ai_rust_service-macos-x86_64"
+  else
+    # Fallback to intel binary for other architectures
+    RUST_BIN_NAME="writer_ai_rust_service-macos-intel"
+  fi
+elif [ "$OS" = "Linux" ]; then
+  RUST_BIN_NAME="writer_ai_rust_service-linux-amd64"
+else
+  echo -e "${RED}Unsupported operating system: $OS${NC}"
+  exit 1
+fi
+
+# Extract the download URL for the appropriate Rust binary from the release
+RUST_BIN_URL=$(echo "$LATEST_RELEASE" | grep -o "\"browser_download_url\": *\"[^\"]*${RUST_BIN_NAME}[^\"]*\"" | sed 's/"browser_download_url": *"//;s/"//')
+
+if [ -n "$RUST_BIN_URL" ]; then
+  echo -e "${BLUE}Downloading ${RUST_BIN_NAME} from ${RUST_BIN_URL}...${NC}"
+  curl -L -o "${BIN_DIR}/writer_ai_rust_service" "$RUST_BIN_URL"
+  chmod +x "${BIN_DIR}/writer_ai_rust_service"
+  
+  if [ -f "${BIN_DIR}/writer_ai_rust_service" ]; then
+    echo -e "${GREEN}Successfully downloaded Rust service${NC}"
+  else
+    echo -e "${RED}Failed to download Rust service${NC}"
+  fi
+else
+  echo -e "${RED}Could not find appropriate Rust binary URL in release assets${NC}"
+  echo -e "${YELLOW}Please install manually or report this issue.${NC}"
+fi
 
 echo -e "${GREEN}WriterAI has been successfully installed to ${INSTALL_DIR}/WriterAI.app${NC}"
 echo -e "${GREEN}Rust service installed to ${BIN_DIR}/writer_ai_rust_service${NC}"
@@ -186,7 +226,13 @@ echo -e "${YELLOW}Note: When opening the app for the first time, you may need to
 echo -e "${BLUE}Starting WriterAI...${NC}"
 open "${INSTALL_DIR}/WriterAI.app"
 
-echo -e "${BLUE}Starting Rust service...${NC}"
-"${BIN_DIR}/writer_ai_rust_service" &
+# Start the Rust service if it exists
+if [ -f "${BIN_DIR}/writer_ai_rust_service" ]; then
+  echo -e "${BLUE}Starting Rust service...${NC}"
+  "${BIN_DIR}/writer_ai_rust_service" &
+else
+  echo -e "${RED}Cannot start Rust service: Binary not found.${NC}"
+  echo -e "${YELLOW}Please check your installation or download the service manually from the release page.${NC}"
+fi
 
 exit 0
