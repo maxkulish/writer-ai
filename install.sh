@@ -167,27 +167,21 @@ if [ -n "$RUST_BIN_URL" ]; then
     # Create LaunchAgent directory if it doesn't exist
     mkdir -p "${LAUNCH_AGENT_DIR}"
     
-    # Create LaunchAgent plist file
-    echo '<?xml version="1.0" encoding="UTF-8"?>' > "${LAUNCH_AGENT_FILE}"
-    echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' >> "${LAUNCH_AGENT_FILE}"
-    echo '<plist version="1.0">' >> "${LAUNCH_AGENT_FILE}"
-    echo '<dict>' >> "${LAUNCH_AGENT_FILE}"
-    echo '    <key>Label</key>' >> "${LAUNCH_AGENT_FILE}"
-    echo "    <string>${SERVICE_NAME}</string>" >> "${LAUNCH_AGENT_FILE}"
-    echo '    <key>ProgramArguments</key>' >> "${LAUNCH_AGENT_FILE}"
-    echo '    <array>' >> "${LAUNCH_AGENT_FILE}"
-    echo "        <string>${BIN_DIR}/writer_ai_rust_service</string>" >> "${LAUNCH_AGENT_FILE}"
-    echo '    </array>' >> "${LAUNCH_AGENT_FILE}"
-    echo '    <key>RunAtLoad</key>' >> "${LAUNCH_AGENT_FILE}"
-    echo '    <true/>' >> "${LAUNCH_AGENT_FILE}"
-    echo '    <key>KeepAlive</key>' >> "${LAUNCH_AGENT_FILE}"
-    echo '    <true/>' >> "${LAUNCH_AGENT_FILE}"
-    echo '    <key>StandardErrorPath</key>' >> "${LAUNCH_AGENT_FILE}"
-    echo "    <string>${LOG_FILE}</string>" >> "${LAUNCH_AGENT_FILE}"
-    echo '    <key>StandardOutPath</key>' >> "${LAUNCH_AGENT_FILE}"
-    echo "    <string>${LOG_FILE}</string>" >> "${LAUNCH_AGENT_FILE}"
-    echo '</dict>' >> "${LAUNCH_AGENT_FILE}"
-    echo '</plist>' >> "${LAUNCH_AGENT_FILE}"
+    # Get the LaunchAgent template and configure it
+    echo -e "${BLUE}Creating LaunchAgent from template...${NC}"
+    
+    # Try to get the template from the app bundle
+    if [ -f "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/launchd.plist" ]; then
+      cp "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/launchd.plist" "${LAUNCH_AGENT_FILE}"
+    else
+      # Fetch template from GitHub if not available in the app bundle
+      echo -e "${YELLOW}Fetching LaunchAgent template from repository...${NC}"
+      curl -s -L "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/templates/launchd.plist" > "${LAUNCH_AGENT_FILE}"
+    fi
+    
+    # Replace placeholder values with actual paths
+    sed -i '' "s|__BINARY_PATH__|${BIN_DIR}/writer_ai_rust_service|g" "${LAUNCH_AGENT_FILE}"
+    sed -i '' "s|__LOG_PATH__|${LOG_FILE}|g" "${LAUNCH_AGENT_FILE}"
     
     # Load the LaunchAgent
     echo -e "${BLUE}Starting Rust service via LaunchAgent...${NC}"
