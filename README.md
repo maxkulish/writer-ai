@@ -2,6 +2,14 @@
 
 WriterAI is a productivity tool that enhances your writing with LLM assistance. It runs in the background and can be triggered with a customizable hotkey to instantly improve your text.
 
+[![GitHub release (latest by date)](https://img.shields.io/github/v/release/maxkulish/writer-ai)](https://github.com/maxkulish/writer-ai/releases/latest)
+[![GitHub license](https://img.shields.io/github/license/maxkulish/writer-ai)](https://github.com/maxkulish/writer-ai/blob/main/LICENSE)
+
+**Quick Install:**
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/maxkulish/writer-ai/HEAD/install.sh)"
+```
+
 ## Features
 
 - Runs quietly in the background with minimal resource usage
@@ -12,9 +20,23 @@ WriterAI is a productivity tool that enhances your writing with LLM assistance. 
 
 ## Installation
 
-### macOS
+### One-Line Installer (Recommended)
 
-1. Download the latest release `.dmg` file from the [Releases](https://github.com/your-username/writer-ai/releases) page
+The easiest way to install WriterAI is with the one-line installer:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/maxkulish/writer-ai/HEAD/install.sh)"
+```
+
+This script will:
+1. Fetch the latest release from GitHub
+2. Download the DMG file
+3. Mount the DMG and install to your Applications folder
+4. Launch the app automatically
+
+### Manual Installation (macOS)
+
+1. Download the latest release `.dmg` file from the [Releases](https://github.com/maxkulish/writer-ai/releases) page
 2. Open the DMG file
 3. Drag the WriterAI app to your Applications folder
 4. Open WriterAI from your Applications folder
@@ -22,7 +44,7 @@ WriterAI is a productivity tool that enhances your writing with LLM assistance. 
 
 ### Download Prebuilt Binaries
 
-You can download just the Rust service binary from the [GitHub Releases](https://github.com/your-username/writer-ai/releases) page:
+You can download just the Rust service binary from the [GitHub Releases](https://github.com/maxkulish/writer-ai/releases) page:
 
 1. Choose the appropriate binary for your platform:
    - `writer_ai_rust_service-macos-arm64` - for Apple Silicon (M1/M2) Macs
@@ -50,7 +72,7 @@ You can download just the Rust service binary from the [GitHub Releases](https:/
 
 1. Clone this repository
    ```bash
-   git clone https://github.com/your-username/writer-ai.git
+   git clone https://github.com/maxkulish/writer-ai.git
    cd writer-ai
    ```
 
