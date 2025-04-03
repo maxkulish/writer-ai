@@ -15,6 +15,10 @@ REPO_NAME="writer-ai"
 DMG_FILENAME="WriterAI.dmg"
 INSTALL_DIR="/Applications"
 TMP_DIR=$(mktemp -d)
+SERVICE_NAME="com.user.writer_ai_rust_service"
+LAUNCH_AGENT_DIR="${HOME}/Library/LaunchAgents"
+LAUNCH_AGENT_FILE="${LAUNCH_AGENT_DIR}/${SERVICE_NAME}.plist"
+LOG_FILE="${HOME}/Library/Logs/writer_ai_rust_service.log"
 
 echo -e "${BLUE}=== WriterAI Installer ===${NC}"
 echo "This script will download and install WriterAI to your Applications folder."
@@ -68,7 +72,7 @@ if [ -d "${MOUNT_POINT}/WriterAI.app" ]; then
     echo -e "${YELLOW}Removing previous installation...${NC}"
     rm -rf "${INSTALL_DIR}/WriterAI.app"
   fi
-  
+
   cp -R "${MOUNT_POINT}/WriterAI.app" "${INSTALL_DIR}/"
   if [ $? -ne 0 ]; then
     echo -e "${RED}Error: Failed to copy the application to ${INSTALL_DIR}. Make sure you have the necessary permissions.${NC}"
@@ -97,88 +101,28 @@ if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
   # Check if Ollama is installed
   if command -v ollama &> /dev/null; then
     echo -e "${GREEN}Ollama found, using local LLM configuration${NC}"
-    cat > "${CONFIG_DIR}/config.toml" << 'EOT'
-# WriterAI Ollama Configuration
-port = 8989
-llm_url = "http://localhost:11434/api/chat"
-# You can change the model to any model available in your Ollama installation
-model_name = "mistral:latest"
-
-# Optional params for model behavior
-[llm_params]
-temperature = 0.7
-max_output_tokens = 2048
-top_p = 1
-
-# Prompt template for improving text
-prompt_template = """Improve the provided text input for clarity, grammar, and overall communication, ensuring it's fluently expressed in English.
-
-# Steps
-
-1. **Identify Errors**: Examine the input text for grammatical, spelling, and punctuation errors.
-2. **Improve Clarity**: Rephrase sentences to improve clarity and flow while maintaining the original meaning.
-3. **Ensure Fluency**: Adjust the text to sound natural and fluent in English.
-4. **Check Consistency**: Ensure the tone remains consistent throughout the text.
-5. **Produce Improved Text**: Deliver the revised version focusing on correctness and readability.
-
-# Output Format
-
-- Provide a single improved version of the input text as a plain sentence or paragraph.
-- Do not include the original text in the response.
-
-{{input}}
-"""
-EOT
+    cp "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/ollama.toml" "${CONFIG_DIR}/config.toml"
+    if [ $? -ne 0 ]; then
+      # Try to get template from GitHub repo
+      echo -e "${YELLOW}Failed to copy template, fetching from repository...${NC}"
+      curl -s -L "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/templates/ollama.toml" > "${CONFIG_DIR}/config.toml"
+    fi
   else
     echo -e "${YELLOW}Ollama not found, using OpenAI configuration template${NC}"
     echo -e "${YELLOW}You'll need to edit ${CONFIG_DIR}/config.toml to add your OpenAI API key${NC}"
-    cat > "${CONFIG_DIR}/config.toml" << 'EOT'
-# WriterAI OpenAI Configuration
-port = 8989
-llm_url = "https://api.openai.com/v1/responses"
-model_name = "gpt-4o"
-
-# Authentication for OpenAI API
-# Replace with your actual API key
-openai_api_key = "YOUR_OPENAI_API_KEY_HERE"
-# openai_org_id = "YOUR_ORGANIZATION_ID" # Optional 
-
-# Optional params for model behavior
-[llm_params]
-temperature = 0.7
-max_output_tokens = 2048
-top_p = 1
-
-# Prompt template for improving text
-prompt_template = """Improve the provided text input for clarity, grammar, and overall communication, ensuring it's fluently expressed in English.
-
-# Steps
-
-1. **Identify Errors**: Examine the input text for grammatical, spelling, and punctuation errors.
-2. **Improve Clarity**: Rephrase sentences to improve clarity and flow while maintaining the original meaning.
-3. **Ensure Fluency**: Adjust the text to sound natural and fluent in English.
-4. **Check Consistency**: Ensure the tone remains consistent throughout the text.
-5. **Produce Improved Text**: Deliver the revised version focusing on correctness and readability.
-
-# Output Format
-
-- Provide a single improved version of the input text as a plain sentence or paragraph.
-- Do not include the original text in the response.
-
-{{input}}
-"""
-EOT
+    cp "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/gpt-4o.toml" "${CONFIG_DIR}/config.toml"
+    if [ $? -ne 0 ]; then
+      # Try to get template from GitHub repo
+      echo -e "${YELLOW}Failed to copy template, fetching from repository...${NC}"
+      curl -s -L "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/templates/gpt-4o.toml" > "${CONFIG_DIR}/config.toml"
+    fi
   fi
 fi
 
-# Copy the Rust service to a user-accessible location
+# Install the Rust service
 echo -e "${BLUE}Installing Rust service...${NC}"
-RUST_SERVICE_APP="${INSTALL_DIR}/WriterAI.app/Contents/Resources/rust_service/writer_ai_rust_service"
 BIN_DIR="${HOME}/.local/bin"
 mkdir -p "${BIN_DIR}"
-
-# Download the Rust service directly from GitHub release assets
-echo -e "${BLUE}Downloading Rust service from GitHub release...${NC}"
 
 # Determine which binary to download based on architecture
 ARCH=$(uname -m)
@@ -208,9 +152,52 @@ if [ -n "$RUST_BIN_URL" ]; then
   echo -e "${BLUE}Downloading ${RUST_BIN_NAME} from ${RUST_BIN_URL}...${NC}"
   curl -L -o "${BIN_DIR}/writer_ai_rust_service" "$RUST_BIN_URL"
   chmod +x "${BIN_DIR}/writer_ai_rust_service"
-  
+
   if [ -f "${BIN_DIR}/writer_ai_rust_service" ]; then
     echo -e "${GREEN}Successfully downloaded Rust service${NC}"
+    
+    # Set up the LaunchAgent
+    echo -e "${BLUE}Setting up LaunchAgent for Rust service...${NC}"
+    
+    # Unload existing agent if it exists
+    if [ -f "${LAUNCH_AGENT_FILE}" ]; then
+      launchctl unload "${LAUNCH_AGENT_FILE}" 2>/dev/null || true
+    fi
+    
+    # Create LaunchAgent directory if it doesn't exist
+    mkdir -p "${LAUNCH_AGENT_DIR}"
+    
+    # Create LaunchAgent plist file
+    echo '<?xml version="1.0" encoding="UTF-8"?>' > "${LAUNCH_AGENT_FILE}"
+    echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">' >> "${LAUNCH_AGENT_FILE}"
+    echo '<plist version="1.0">' >> "${LAUNCH_AGENT_FILE}"
+    echo '<dict>' >> "${LAUNCH_AGENT_FILE}"
+    echo '    <key>Label</key>' >> "${LAUNCH_AGENT_FILE}"
+    echo "    <string>${SERVICE_NAME}</string>" >> "${LAUNCH_AGENT_FILE}"
+    echo '    <key>ProgramArguments</key>' >> "${LAUNCH_AGENT_FILE}"
+    echo '    <array>' >> "${LAUNCH_AGENT_FILE}"
+    echo "        <string>${BIN_DIR}/writer_ai_rust_service</string>" >> "${LAUNCH_AGENT_FILE}"
+    echo '    </array>' >> "${LAUNCH_AGENT_FILE}"
+    echo '    <key>RunAtLoad</key>' >> "${LAUNCH_AGENT_FILE}"
+    echo '    <true/>' >> "${LAUNCH_AGENT_FILE}"
+    echo '    <key>KeepAlive</key>' >> "${LAUNCH_AGENT_FILE}"
+    echo '    <true/>' >> "${LAUNCH_AGENT_FILE}"
+    echo '    <key>StandardErrorPath</key>' >> "${LAUNCH_AGENT_FILE}"
+    echo "    <string>${LOG_FILE}</string>" >> "${LAUNCH_AGENT_FILE}"
+    echo '    <key>StandardOutPath</key>' >> "${LAUNCH_AGENT_FILE}"
+    echo "    <string>${LOG_FILE}</string>" >> "${LAUNCH_AGENT_FILE}"
+    echo '</dict>' >> "${LAUNCH_AGENT_FILE}"
+    echo '</plist>' >> "${LAUNCH_AGENT_FILE}"
+    
+    # Load the LaunchAgent
+    echo -e "${BLUE}Starting Rust service via LaunchAgent...${NC}"
+    launchctl load "${LAUNCH_AGENT_FILE}"
+    
+    if [ $? -eq 0 ]; then
+      echo -e "${GREEN}Rust service installed and started successfully${NC}"
+    else
+      echo -e "${RED}Failed to start Rust service via LaunchAgent${NC}"
+    fi
   else
     echo -e "${RED}Failed to download Rust service${NC}"
   fi
@@ -222,17 +209,9 @@ fi
 echo -e "${GREEN}WriterAI has been successfully installed to ${INSTALL_DIR}/WriterAI.app${NC}"
 echo -e "${GREEN}Rust service installed to ${BIN_DIR}/writer_ai_rust_service${NC}"
 echo -e "${GREEN}Configuration file created at ${CONFIG_DIR}/config.toml${NC}"
+echo -e "${GREEN}Rust service logs will be saved to ${LOG_FILE}${NC}"
 echo -e "${YELLOW}Note: When opening the app for the first time, you may need to go to System Preferences > Security & Privacy and click 'Open Anyway'${NC}"
 echo -e "${BLUE}Starting WriterAI...${NC}"
 open "${INSTALL_DIR}/WriterAI.app"
-
-# Start the Rust service if it exists
-if [ -f "${BIN_DIR}/writer_ai_rust_service" ]; then
-  echo -e "${BLUE}Starting Rust service...${NC}"
-  "${BIN_DIR}/writer_ai_rust_service" &
-else
-  echo -e "${RED}Cannot start Rust service: Binary not found.${NC}"
-  echo -e "${YELLOW}Please check your installation or download the service manually from the release page.${NC}"
-fi
 
 exit 0
