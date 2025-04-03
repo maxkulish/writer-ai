@@ -1157,7 +1157,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 keyName: "N",
                 modifierFlags: [.control, .shift],
                 modifierFlagNames: ["Control", "Shift"],
-                displayName: "⇧⌥W (Shift+Option+W)"
+                displayName: "⌃⇧N (Ctrl+Shift+N)"
             )
         }
         

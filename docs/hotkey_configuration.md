@@ -19,13 +19,13 @@ Look for the `HotkeyConfiguration` section in the Info.plist file:
 <key>HotkeyConfiguration</key>
 <dict>
     <key>ModifierFlags</key>
-    <string>option,shift</string>
+    <string>control,shift</string>
     <key>KeyCode</key>
-    <integer>13</integer>
+    <integer>45</integer>
     <key>KeyName</key>
-    <string>W</string>
+    <string>N</string>
     <key>HotkeyDisplayName</key>
-    <string>⇧⌥W (Shift+Option+W)</string>
+    <string>⌃⇧N (Ctrl+Shift+N)</string>
 </dict>
 ```
 
@@ -57,16 +57,16 @@ Look for the `HotkeyConfiguration` section in the Info.plist file:
 
 ### Common Hotkey Examples
 
-#### Command+Shift+W
+#### Command+Shift+N
 ```xml
 <key>ModifierFlags</key>
 <string>command,shift</string>
 <key>KeyCode</key>
-<integer>13</integer>
+<integer>45</integer>
 <key>KeyName</key>
-<string>W</string>
+<string>N</string>
 <key>HotkeyDisplayName</key>
-<string>⇧⌘W (Shift+Command+W)</string>
+<string>⇧⌘N (Shift+Command+N)</string>
 ```
 
 #### Option+Space
