@@ -8,6 +8,13 @@ on:
   pull_request:
     branches: [ main ]
 
+# These permissions are needed for the GitHub token
+permissions:
+  contents: write      # Required for creating releases and uploading assets
+  discussions: write   # Optional: if you want to create discussions
+  issues: write        # Optional: if you want to interact with issues
+  pull-requests: write # Optional: if you want to interact with pull requests
+
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
@@ -99,6 +106,8 @@ jobs:
       - name: Create GitHub Release
         id: create_release
         uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GH_TOKEN }}
         with:
           files: |
             writer_ai_rust_service-linux-amd64/writer_ai_rust_service-linux-amd64
