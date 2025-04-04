@@ -921,44 +921,56 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         
-        // Reduced delay before paste (from 0.3s to 0.1s)
+        // Reduced delay before paste
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-            // Use NSAppleScript as a fallback method
-            // This is cleaner and avoids double-paste issues that might occur with CGEvent
-            let pasteScript = "tell application \"System Events\" to keystroke \"v\" using command down"
-            self.runAppleScript(script: pasteScript) { success in
-                print("DEBUG: Paste complete via AppleScript - success: \(success)")
-                print("DEBUG: Clipboard contains: \(NSPasteboard.general.string(forType: .string) ?? "nil")")
-                
-                if !success {
-                    // Fallback to CGEvent approach if AppleScript fails
-                    print("DEBUG: AppleScript paste failed, trying CGEvent method")
-                    
-                    let source = CGEventSource(stateID: .combinedSessionState)
-                    
-                    // Command down
-                    let cmdKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: true)
-                    cmdKeyDown?.flags = .maskCommand
-                    cmdKeyDown?.post(tap: .cghidEventTap)
-                    
-                    // V down
-                    let vKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
-                    vKeyDown?.flags = .maskCommand
-                    vKeyDown?.post(tap: .cghidEventTap)
-                    
-                    // V up
-                    let vKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
-                    vKeyUp?.post(tap: .cghidEventTap)
-                    
-                    // Command up
-                    let cmdKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false)
-                    cmdKeyUp?.post(tap: .cghidEventTap)
-                }
-                
-                // Reduced delay after paste (from 0.2s to 0.1s)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                    completion(true)
-                }
+            print("DEBUG: Attempting paste via CGEvent first")
+            
+            // Try CGEvent approach first since it's faster than AppleScript
+            let source = CGEventSource(stateID: .combinedSessionState)
+            guard let source = source else {
+                print("ERROR: Failed to create CGEventSource")
+                self.fallbackToAppleScriptPaste(completion: completion)
+                return
+            }
+            
+            // Command down
+            let cmdKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: true)
+            cmdKeyDown?.flags = .maskCommand
+            cmdKeyDown?.post(tap: .cghidEventTap)
+            
+            // V down
+            let vKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true)
+            vKeyDown?.flags = .maskCommand
+            vKeyDown?.post(tap: .cghidEventTap)
+            
+            // V up
+            let vKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false)
+            vKeyUp?.post(tap: .cghidEventTap)
+            
+            // Command up
+            let cmdKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false)
+            cmdKeyUp?.post(tap: .cghidEventTap)
+            
+            print("DEBUG: CGEvent paste sequence posted.")
+            
+            // Reduced delay after paste
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                print("DEBUG: Paste complete via CGEvent.")
+                completion(true)
+            }
+        }
+    }
+    
+    // Helper for fallback to AppleScript paste if CGEvent fails
+    private func fallbackToAppleScriptPaste(completion: @escaping (Bool) -> Void) {
+        print("DEBUG: Falling back to AppleScript paste.")
+        let pasteScript = "tell application \"System Events\" to keystroke \"v\" using command down"
+        self.runAppleScript(script: pasteScript) { success in
+            print("DEBUG: Paste complete via AppleScript fallback - success: \(success)")
+            
+            // Even if AppleScript fails, we need to complete the operation
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                completion(success)
             }
         }
     }
