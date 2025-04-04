@@ -803,82 +803,102 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Clear pasteboard *before* copy to help ensure we get the new content
         NSPasteboard.general.clearContents()
         
-        // Reduced delay before triggering copy
-        let delayTime = DispatchTime.now() + 0.15 // Reduced from 0.25s to 0.15s
-        DispatchQueue.main.asyncAfter(deadline: delayTime) {
-            let source = CGEventSource(stateID: .combinedSessionState)
+        // Shorter delay before triggering copy
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            guard let source = CGEventSource(stateID: .combinedSessionState) else {
+                print("ERROR: Failed to create CGEventSource for copy")
+                self.fallbackToAppleScriptCopy(completion: completion)
+                return
+            }
             
-            // Create key down event for command key (modifiers)
-            let cmdKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: true) // 0x37 is Command key
+            // Create and post all events for Cmd+C
+            let cmdKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: true) // Command key
             cmdKeyDown?.flags = .maskCommand
-            cmdKeyDown?.post(tap: .cghidEventTap)
             
-            // Create key down event for 'c' key
-            let cKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: true) // 0x08 is 'c' key
+            let cKeyDown = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: true) // 'c' key
             cKeyDown?.flags = .maskCommand
-            cKeyDown?.post(tap: .cghidEventTap)
             
-            // Create key up event for 'c' key
             let cKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x08, keyDown: false)
-            cKeyUp?.post(tap: .cghidEventTap)
-            
-            // Create key up event for command key
             let cmdKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false)
+            
+            // Post the events in sequence
+            cmdKeyDown?.post(tap: .cghidEventTap)
+            cKeyDown?.post(tap: .cghidEventTap)
+            cKeyUp?.post(tap: .cghidEventTap)
             cmdKeyUp?.post(tap: .cghidEventTap)
             
-            // Reduced delay for clipboard check
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { // Reduced from 0.5s to 0.15s
-                // DEBUG: Add the suggested debug print
-                print("DEBUG: Clipboard content after copy simulation: \(NSPasteboard.general.string(forType: .string) ?? "nil")")
+            // Check clipboard with slightly reduced delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                print("DEBUG: Clipboard content after copy: \(NSPasteboard.general.string(forType: .string) ?? "nil")")
                 
-                let hasPasteboardContent = NSPasteboard.general.string(forType: .string) != nil
-                if hasPasteboardContent {
+                if NSPasteboard.general.string(forType: .string) != nil {
+                    // Success - we got something on the clipboard
                     completion(true)
                 } else {
-                    // If we're testing, provide fallback content
-                    if UserDefaults.standard.bool(forKey: "ProvideTestContentOnFailure") {
-                        print("Copy failed, but providing test content anyway due to defaults setting")
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString("Fallback test content for WriterAI", forType: .string)
+                    self.handleCopyFailure(completion: completion)
+                }
+            }
+        }
+    }
+    
+    private func fallbackToAppleScriptCopy(completion: @escaping (Bool) -> Void) {
+        print("DEBUG: Falling back to AppleScript copy.")
+        let copyScript = "tell application \"System Events\" to keystroke \"c\" using command down"
+        self.runAppleScript(script: copyScript) { success in
+            print("DEBUG: Copy complete via AppleScript fallback - success: \(success)")
+            
+            if success {
+                // Check if AppleScript actually got content into clipboard
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                    if NSPasteboard.general.string(forType: .string) != nil {
                         completion(true)
                     } else {
-                        // Check if we have automation permissions before falling back
-                        let automationWorking = self.checkAutomationPermission()
-                        if automationWorking {
-                            // Fallback to AppleScript if CGEvent approach fails and we have permissions
-                            print("CGEvent copy failed, falling back to AppleScript...")
-                            self.runAppleScript(script: #"tell application "System Events" to keystroke "c" using {command down}"#, completion: completion)
-                        } else {
-                            // Show an alert about copy failure and prompt for manual entry
-                            print("Copy simulation failed and automation unavailable")
-                            
-                            DispatchQueue.main.async {
-                                let alert = NSAlert()
-                                alert.messageText = "Copy Operation Failed"
-                                alert.informativeText = "We couldn't access your selected text. Would you like to enter text manually for processing?"
-                                alert.alertStyle = .warning
-                                alert.addButton(withTitle: "Enter Text Manually")
-                                alert.addButton(withTitle: "Cancel")
-                                
-                                let response = alert.runModal()
-                                if response == .alertFirstButtonReturn {
-                                    // Show input dialog
-                                    self.showManualTextEntryDialog(completion: { text in
-                                        if let text = text, !text.isEmpty {
-                                            NSPasteboard.general.clearContents()
-                                            NSPasteboard.general.setString(text, forType: .string)
-                                            completion(true)
-                                        } else {
-                                            completion(false)
-                                        }
-                                    })
-                                } else {
-                                    completion(false)
-                                }
-                            }
-                        }
+                        // Still no content - handle as failure
+                        self.handleCopyFailure(completion: completion)
                     }
                 }
+            } else {
+                // AppleScript failed - go to manual entry
+                self.handleCopyFailure(completion: completion)
+            }
+        }
+    }
+    
+    private func handleCopyFailure(completion: @escaping (Bool) -> Void) {
+        // If in test mode, use fallback content
+        if UserDefaults.standard.bool(forKey: "ProvideTestContentOnFailure") {
+            print("Copy failed, but providing test content anyway due to defaults setting")
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString("Fallback test content for WriterAI", forType: .string)
+            completion(true)
+            return
+        }
+        
+        // Show an alert about copy failure and prompt for manual entry
+        print("Copy simulation failed - prompting for manual input")
+        
+        DispatchQueue.main.async {
+            let alert = NSAlert()
+            alert.messageText = "Copy Operation Failed"
+            alert.informativeText = "We couldn't access your selected text. Would you like to enter text manually for processing?"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Enter Text Manually")
+            alert.addButton(withTitle: "Cancel")
+            
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                // Show input dialog
+                self.showManualTextEntryDialog(completion: { text in
+                    if let text = text, !text.isEmpty {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(text, forType: .string)
+                        completion(true)
+                    } else {
+                        completion(false)
+                    }
+                })
+            } else {
+                completion(false)
             }
         }
     }
