@@ -403,11 +403,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func testHotkey(_ sender: Any?) {
         print("Manual test of hotkey processing triggered")
         
+        // Start timing for the test
+        let testStartTime = Date()
+        
         // Use the input dialog for test mode since we're being explicit about testing
         self.showManualTextEntryDialog(completion: { text in
             if let text = text, !text.isEmpty {
-                // Process the manually entered text
-                self.processTextWithFallbacks(text, originalTypes: nil, originalContent: nil)
+                // Get time for dialog input completion
+                let inputDuration = Date().timeIntervalSince(testStartTime)
+                
+                // Process the manually entered text with timing information
+                self.processTextWithFallbacks(text, originalTypes: nil, originalContent: nil, 
+                                             timing: (start: testStartTime, copy: inputDuration))
             }
         })
     }
@@ -640,6 +647,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
         
+        // Start timing for the entire operation
+        let hotkeyStartTime = Date()
+        
         // Get the current hotkey config for accurate logging
         let hotkeyConfig = readHotkeyConfiguration()
         print("🔥 HOTKEY HANDLER ACTIVATED: \(hotkeyConfig.modifierFlagNames.joined(separator: "+"))+\(hotkeyConfig.keyName) 🔥")
@@ -667,8 +677,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return originalPasteboard.string(forType: type)
         }
         
+        // Start timing for the copy operation
+        let copyStartTime = Date()
+        
         // Use direct CGEvent approach for copy
         simulateCopy { success in
+            let copyDuration = Date().timeIntervalSince(copyStartTime)
+            print("TIMING: simulateCopy took \(copyDuration * 1000) ms")
+            
             guard success else {
                 self.showErrorNotification(title: "Copy Failed", message: "Could not simulate Cmd+C. Check Accessibility permissions.")
                 self.restorePasteboard(originalTypes: originalTypes, originalContent: originalContent)
@@ -677,8 +693,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 return
             }
             
-            // Short delay for clipboard to update reliably
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { // 250ms delay
+            // Reduced delay for clipboard to update reliably (from 0.25s to 0.15s)
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                 guard let selectedText = NSPasteboard.general.string(forType: .string), !selectedText.isEmpty else {
                     print("No text found on clipboard after copy attempt.")
                     self.restorePasteboard(originalTypes: originalTypes, originalContent: originalContent)
@@ -689,26 +705,43 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 
                 print("Selected Text Length: \(selectedText.count)")
                 
+                // Start timing for text processing (including network request)
+                let processStartTime = Date()
+                
                 // 2. Process text directly
-                self.processTextWithFallbacks(selectedText, originalTypes: originalTypes, originalContent: originalContent)
+                self.processTextWithFallbacks(selectedText, originalTypes: originalTypes, originalContent: originalContent, 
+                                              timing: (start: hotkeyStartTime, copy: copyDuration))
             }
         }
     }
     
-    private func processTextWithFallbacks(_ text: String, originalTypes: [NSPasteboard.PasteboardType]?, originalContent: [String]?) {
+    private func processTextWithFallbacks(_ text: String, originalTypes: [NSPasteboard.PasteboardType]?, originalContent: [String]?, 
+                              timing: (start: Date, copy: TimeInterval)? = nil) {
         print("Processing text directly using URLSession...")
+        
+        // Start timing for network request
+        let networkStartTime = Date()
         
         // Send text to Rust service using direct method
         self.sendToRustService(text: text) { result in
+            let networkDuration = Date().timeIntervalSince(networkStartTime)
+            print("TIMING: Network request took \(networkDuration * 1000) ms")
+            
             // Ensure UI updates (paste simulation, notifications) are on main thread
             DispatchQueue.main.async {
                 switch result {
                 case .success(let llmResponse):
                     print("Received LLM Response Length: \(llmResponse.count)")
-                    // DEBUG: Add the suggested debug print
                     print("DEBUG: About to paste: \"\(llmResponse)\"")
+                    
+                    // Start timing for paste operation
+                    let pasteStartTime = Date()
+                    
                     // Paste the response
                     self.simulatePaste(text: llmResponse) { pasteSuccess in
+                        let pasteDuration = Date().timeIntervalSince(pasteStartTime)
+                        print("TIMING: simulatePaste took \(pasteDuration * 1000) ms")
+                        
                         if !pasteSuccess {
                             self.showErrorNotification(title: "Paste Failed", message: "Could not simulate Cmd+V. Response copied to clipboard. Check Accessibility.")
                             // Put response on clipboard as fallback
@@ -716,6 +749,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                             NSPasteboard.general.setString(llmResponse, forType: .string)
                         } else {
                             print("Paste simulation successful.")
+                        }
+                        
+                        // Report total operation time if we have the start time
+                        if let timing = timing {
+                            let totalDuration = Date().timeIntervalSince(timing.start)
+                            print("TIMING SUMMARY:")
+                            print("- Copy operation: \(timing.copy * 1000) ms")
+                            print("- Network request: \(networkDuration * 1000) ms")
+                            print("- Paste operation: \(pasteDuration * 1000) ms")
+                            print("- Total operation: \(totalDuration * 1000) ms")
                         }
                         
                         // Reset the hotkey handling flag on both success and failure
@@ -731,6 +774,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self.showErrorNotification(title: "Processing Error", message: errorMessage)
                     // Restore original clipboard on error
                     self.restorePasteboard(originalTypes: originalTypes, originalContent: originalContent)
+                    
+                    // Report timing even in case of failure
+                    if let timing = timing {
+                        let totalDuration = Date().timeIntervalSince(timing.start)
+                        print("TIMING ERROR SUMMARY:")
+                        print("- Copy operation: \(timing.copy * 1000) ms")
+                        print("- Failed network request: \(networkDuration * 1000) ms")
+                        print("- Total operation until error: \(totalDuration * 1000) ms")
+                    }
+                    
                     // Reset hotkey handling flag on error
                     self.isHandlingHotkey = false
                     print("✅ Hotkey handler reset after error - ready for next hotkey")
@@ -750,8 +803,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // Clear pasteboard *before* copy to help ensure we get the new content
         NSPasteboard.general.clearContents()
         
-        // Try direct key event simulation for better reliability
-        let delayTime = DispatchTime.now() + 0.25 // Increased delay before triggering copy
+        // Reduced delay before triggering copy
+        let delayTime = DispatchTime.now() + 0.15 // Reduced from 0.25s to 0.15s
         DispatchQueue.main.asyncAfter(deadline: delayTime) {
             let source = CGEventSource(stateID: .combinedSessionState)
             
@@ -773,8 +826,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let cmdKeyUp = CGEvent(keyboardEventSource: source, virtualKey: 0x37, keyDown: false)
             cmdKeyUp?.post(tap: .cghidEventTap)
             
-            // Check if we got something in the pasteboard with longer delay for reliability
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { // Increased delay to 500ms
+            // Reduced delay for clipboard check
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { // Reduced from 0.5s to 0.15s
                 // DEBUG: Add the suggested debug print
                 print("DEBUG: Clipboard content after copy simulation: \(NSPasteboard.general.string(forType: .string) ?? "nil")")
                 
@@ -868,8 +921,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
         
-        // Try a much simpler approach - doing a single paste with no repeat
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { // 300ms delay
+        // Reduced delay before paste (from 0.3s to 0.1s)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
             // Use NSAppleScript as a fallback method
             // This is cleaner and avoids double-paste issues that might occur with CGEvent
             let pasteScript = "tell application \"System Events\" to keystroke \"v\" using command down"
@@ -902,8 +955,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     cmdKeyUp?.post(tap: .cghidEventTap)
                 }
                 
-                // Complete with success after a small delay
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                // Reduced delay after paste (from 0.2s to 0.1s)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                     completion(true)
                 }
             }
