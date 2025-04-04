@@ -48,6 +48,31 @@ go test -race -coverprofile=coverage.out ./... && go tool cover -func=coverage.o
 
 ## Git Workflow
 
+### Versioning and Tagging Strategy
+- Follow semantic versioning (SemVer) principles: `vMAJOR.MINOR.PATCH`
+  - MAJOR: Increment for incompatible API changes
+  - MINOR: Increment for backward-compatible functionality
+  - PATCH: Increment for backward-compatible bug fixes
+- Use `v` prefix for all version tags: `v1.2.3`
+- For pre-releases, use hyphenated suffixes: `v1.2.3-beta.1`
+- When introducing breaking changes:
+  - Increment MAJOR version
+  - Create a new module path with `/vN` suffix for v2+
+- Tag commands:
+```bash
+# Create lightweight tag
+git tag v1.2.3
+
+# Create annotated tag with message
+git tag -a v1.2.3 -m "Release v1.2.3"
+
+# Push tags to remote
+git push origin v1.2.3
+
+# List all tags
+git tag -l
+```
+
 ### After merging a PR
 ```bash
 # Switch back to the master branch
