@@ -22,6 +22,17 @@ pub struct AppConfig {
     pub openai_org_id: Option<String>,
     #[serde(default)]
     pub openai_project_id: Option<String>,
+    #[serde(default = "default_cache_config")]
+    pub cache: crate::cache::CacheConfig,
+}
+
+// Default cache configuration
+fn default_cache_config() -> crate::cache::CacheConfig {
+    crate::cache::CacheConfig {
+        enabled: true,
+        ttl_days: 30,
+        max_size_mb: 100,
+    }
 }
 
 // --- Configuration Loading ---
@@ -139,6 +150,12 @@ model_name = "{}"
 openai_api_key = "" # Your OpenAI API key (required)
 #openai_org_id = "org-EVPAPa0e5FSeelWefXSvJr8r" # Optional: Your OpenAI Organization ID
 #openai_project_id = "" # Optional: Your OpenAI Project ID
+
+# Response caching configuration
+[cache]
+enabled = true        # Enable or disable the response cache
+ttl_days = 30         # Number of days to keep entries in the cache
+max_size_mb = 100     # Maximum size of the cache in MB
 
 # Optional parameters for the LLM API request body
 [llm_params]
@@ -278,6 +295,7 @@ mod tests {
             openai_api_key: None,
             openai_org_id: None,
             openai_project_id: None,
+            cache: default_cache_config(),
         };
         
         // Just verify that our default values match expectations

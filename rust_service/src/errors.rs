@@ -24,6 +24,8 @@ pub enum AppError {
     MissingHomeDir,
     #[error("Internal Server Error: {0}")]
     Internal(String),
+    #[error("Cache error: {0}")]
+    CacheError(String),
 }
 
 // Convert AppError into an HTTP response
@@ -50,6 +52,10 @@ impl IntoResponse for AppError {
             // Removed handling for unused variant: MissingConfigDir
             AppError::MissingHomeDir => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             AppError::Internal(msg) => (StatusCode::INTERNAL_SERVER_ERROR, msg.clone()),
+            AppError::CacheError(msg) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Cache error: {}", msg),
+            ),
         };
         error!("Error processing request: {}", error_message);
         (status, Json(serde_json::json!({ "error": error_message }))).into_response()

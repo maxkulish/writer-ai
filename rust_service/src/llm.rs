@@ -327,6 +327,11 @@ mod tests {
             openai_api_key: Some("test-key".to_string()),
             openai_org_id: None,
             openai_project_id: None,
+            cache: crate::cache::CacheConfig {
+                enabled: true,
+                ttl_days: 30,
+                max_size_mb: 100,
+            },
         };
 
         // Set up a mock HTTP server for error response

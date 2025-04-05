@@ -1,9 +1,11 @@
 use writer_ai_rust_service::config::AppConfig;
 use writer_ai_rust_service::http::{process_text_handler, ProcessRequest};
+use writer_ai_rust_service::cache::{CacheManager, CacheConfig};
 use axum::extract::State;
 use axum::Json;
 use reqwest::Client;
 use std::sync::Arc;
+use tempfile::TempDir;
 use tokio::fs;
 use std::path::{Path, PathBuf};
 use chrono::Utc;
@@ -867,7 +869,18 @@ async fn test_llm_responses() {
             
             // Create request
             let client = Arc::new(Client::new());
-            let app_state = (config.clone(), client);
+            
+            // Create a temporary cache for testing (disabled)
+            let temp_dir = TempDir::new().expect("Failed to create temp dir for cache");
+            let cache_path = temp_dir.path().join("test_cache.sled");
+            let cache_config = CacheConfig {
+                enabled: false, // Disable cache for integration tests
+                ttl_days: 30,
+                max_size_mb: 100,
+            };
+            let cache_manager = Arc::new(CacheManager::new(cache_path, cache_config).unwrap());
+            
+            let app_state = (config.clone(), client, cache_manager);
             let request = ProcessRequest {
                 text: test_sentence.text.clone(),
             };
@@ -993,7 +1006,18 @@ async fn test_llm_responses() {
             
             // Create request
             let client = Arc::new(Client::new());
-            let app_state = (config.clone(), client);
+            
+            // Create a temporary cache for testing (disabled)
+            let temp_dir = TempDir::new().expect("Failed to create temp dir for cache");
+            let cache_path = temp_dir.path().join("test_cache.sled");
+            let cache_config = CacheConfig {
+                enabled: false, // Disable cache for integration tests
+                ttl_days: 30,
+                max_size_mb: 100,
+            };
+            let cache_manager = Arc::new(CacheManager::new(cache_path, cache_config).unwrap());
+            
+            let app_state = (config.clone(), client, cache_manager);
             let request = ProcessRequest {
                 text: test_sentence.text.clone(),
             };

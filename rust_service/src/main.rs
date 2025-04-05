@@ -1,3 +1,4 @@
+mod cache;
 mod config;
 mod errors;
 mod http;
@@ -5,11 +6,12 @@ mod llm;
 
 use axum::{routing::post, Router};
 use reqwest::Client;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, path::PathBuf};
 use tokio::net::TcpListener;
 use tracing::{error, info, warn};
 use tracing_subscriber::{fmt, EnvFilter};
 
+use crate::cache::CacheManager;
 use crate::config::load_config;
 use crate::errors::AppError;
 use crate::http::process_text_handler;
@@ -161,8 +163,32 @@ async fn main() -> Result<(), AppError> {
         }
     }
 
+    // Initialize the cache
+    let cache_dir = dirs::cache_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("writer_ai_service");
+    
+    std::fs::create_dir_all(&cache_dir)
+        .map_err(|e| AppError::Io(e))?;
+    
+    let cache_path = cache_dir.join("response_cache.sled");
+    info!("Initializing cache at: {:?}", cache_path);
+    
+    let cache_manager = Arc::new(CacheManager::new(
+        cache_path, 
+        shared_config.cache.clone()
+    )?);
+    
+    if shared_config.cache.enabled {
+        info!("Response caching is enabled (TTL: {} days, Max size: {} MB)", 
+            shared_config.cache.ttl_days, 
+            shared_config.cache.max_size_mb);
+    } else {
+        info!("Response caching is disabled");
+    }
+
     // Build application router state
-    let app_state = (shared_config.clone(), shared_client);
+    let app_state = (shared_config.clone(), shared_client, cache_manager);
 
     // Build application router
     let app = Router::new()
