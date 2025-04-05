@@ -145,6 +145,11 @@ mkdir -p "${RESOURCES_DIR}/rust_service"
 cp "${RUST_BIN}" "${RESOURCES_DIR}/rust_service/"
 cp "${RUST_SERVICE_DIR}/config.toml" "${RESOURCES_DIR}/rust_service/" 2>/dev/null || echo "No config.toml found, using defaults"
 
+# Copy template files to Resources
+echo "Copying template files to Resources..."
+mkdir -p "${RESOURCES_DIR}/templates"
+cp -R ./templates/* "${RESOURCES_DIR}/templates/"
+
 # Copy the app to the release directory if paths are different
 echo "Copying app to release directory..."
 if [[ "$APP_PATH" != "${RELEASE_DIR}/${APP_NAME}" ]]; then

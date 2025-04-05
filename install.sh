@@ -101,19 +101,25 @@ if [ ! -f "${CONFIG_DIR}/config.toml" ]; then
   # Check if Ollama is installed
   if command -v ollama &> /dev/null; then
     echo -e "${GREEN}Ollama found, using local LLM configuration${NC}"
-    cp "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/ollama.toml" "${CONFIG_DIR}/config.toml"
-    if [ $? -ne 0 ]; then
-      # Try to get template from GitHub repo
-      echo -e "${YELLOW}Failed to copy template, fetching from repository...${NC}"
+    
+    # First try to get template from app bundle
+    if [ -f "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/ollama.toml" ]; then
+      cp "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/ollama.toml" "${CONFIG_DIR}/config.toml"
+    else
+      # If not found in app bundle, fetch from repository
+      echo -e "${YELLOW}Template not found in app bundle, fetching from repository...${NC}"
       curl -s -L "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/templates/ollama.toml" > "${CONFIG_DIR}/config.toml"
     fi
   else
     echo -e "${YELLOW}Ollama not found, using OpenAI configuration template${NC}"
     echo -e "${YELLOW}You'll need to edit ${CONFIG_DIR}/config.toml to add your OpenAI API key${NC}"
-    cp "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/gpt-4o.toml" "${CONFIG_DIR}/config.toml"
-    if [ $? -ne 0 ]; then
-      # Try to get template from GitHub repo
-      echo -e "${YELLOW}Failed to copy template, fetching from repository...${NC}"
+    
+    # First try to get template from app bundle
+    if [ -f "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/gpt-4o.toml" ]; then
+      cp "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/gpt-4o.toml" "${CONFIG_DIR}/config.toml"
+    else
+      # If not found in app bundle, fetch from repository
+      echo -e "${YELLOW}Template not found in app bundle, fetching from repository...${NC}"
       curl -s -L "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/templates/gpt-4o.toml" > "${CONFIG_DIR}/config.toml"
     fi
   fi
@@ -175,8 +181,13 @@ if [ -n "$RUST_BIN_URL" ]; then
       cp "${INSTALL_DIR}/WriterAI.app/Contents/Resources/templates/launchd.plist" "${LAUNCH_AGENT_FILE}"
     else
       # Fetch template from GitHub if not available in the app bundle
-      echo -e "${YELLOW}Fetching LaunchAgent template from repository...${NC}"
+      echo -e "${YELLOW}LaunchAgent template not found in app bundle, fetching from repository...${NC}"
       curl -s -L "https://raw.githubusercontent.com/${REPO_OWNER}/${REPO_NAME}/main/templates/launchd.plist" > "${LAUNCH_AGENT_FILE}"
+      
+      if [ $? -ne 0 ]; then
+        echo -e "${RED}Failed to fetch template from repository. Please check your internet connection.${NC}"
+        exit 1
+      fi
     fi
     
     # Replace placeholder values with actual paths
