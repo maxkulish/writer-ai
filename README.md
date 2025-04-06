@@ -151,7 +151,7 @@ To use OpenAI models:
 
 1. Edit the config file: `~/.config/writer_ai_service/config.toml`
 2. Add your OpenAI API key: `openai_api_key = "sk-your-actual-api-key"`
-3. Restart the Rust service: 
+3. Restart the Rust service:
    ```bash
    pkill writer_ai_rust_service
    ~/.local/bin/writer_ai_rust_service &
@@ -170,3 +170,12 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 ## License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+# TODO:
+1. After initial setup with `install.sh` script all buttons are not clickable. At least one should work - "restart" Swift application to apply Accessibility setting
+2. Remove all current buttons. In the new menu should be:
+  2.1. Current hotkey
+  2.2. Restart Rust Service (launchctl unload $(LAUNCH_AGENT_FILE) && launchctl load $(LAUNCH_AGENT_FILE))
+  2.3. Restart Swift Service
+  2.4. "launch at login" - if it works, needs testing
+  2.5. Quit

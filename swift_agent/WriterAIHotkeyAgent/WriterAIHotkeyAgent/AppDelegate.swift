@@ -347,6 +347,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         menu.addItem(NSMenuItem.separator())
         
+        // Add a Restart item
+        let restartItem = NSMenuItem(title: "Restart App", action: #selector(restartApp(_:)), keyEquivalent: "")
+        restartItem.target = self
+        menu.addItem(restartItem)
+        
+        menu.addItem(NSMenuItem.separator())
+        
         // Add a quit item
         let quitItem = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)
