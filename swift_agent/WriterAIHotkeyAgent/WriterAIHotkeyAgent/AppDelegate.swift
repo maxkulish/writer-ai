@@ -24,140 +24,103 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         return url
     }()
+    // Service name for launchd
+    private let rustServiceLabel = "com.user.writer_ai_rust_service"
+    
+    // Use the exact bundle ID from Info.plist to ensure consistency
+    private let logger = Logger(subsystem: "com.writer-ai.WriterAIHotkeyAgent", category: "general")
     
     func applicationDidFinishLaunching(_ notification: Notification) {
-        // Set up logging
-        let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.writer-ai.WriterAIHotkeyAgent", category: "startup")
         logger.info("WriterAI Hotkey Agent started.")
         
-        // Disable debug settings
-        UserDefaults.standard.removeObject(forKey: "UseAppleScriptForPaste")
-        UserDefaults.standard.removeObject(forKey: "UseTestMode")
-        UserDefaults.standard.removeObject(forKey: "ProvideTestContentOnFailure")
-        
-        // Handle agent mode by relaunching if needed
+        // Ensure the app runs in agent mode
         setupAgentMode()
         
-        // Make sure app is completely hidden from Dock and app switcher
-        // Use a safer approach to setting activation policy
+        // Make app completely hidden from Dock and app switcher
         DispatchQueue.main.async {
-            // Set activation policy to completely hide from Dock and Cmd+Tab
             NSApplication.shared.setActivationPolicy(.prohibited)
             ProcessInfo.processInfo.automaticTerminationSupportEnabled = true
         }
         
-        // Check if we were recently restarted - if so, skip immediate accessibility check
-        let restartFlag = UserDefaults.standard.bool(forKey: "WasRecentlyRestarted")
-        
-        // Request notification permissions
-        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { granted, error in
+        // Request notification permissions early
+        UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { [weak self] granted, error in
             if let error = error {
-                print("Error requesting notification authorization: \(error)")
+                self?.logger.error("Error requesting notification authorization: \(error.localizedDescription)")
             }
         }
         
-        if restartFlag {
-            // Clear the flag for next time
-            UserDefaults.standard.removeObject(forKey: "WasRecentlyRestarted")
-            print("App was recently restarted - skipping immediate accessibility check")
-            
-            // Just print the current status without prompting or showing alerts
-            let accessEnabled = AXIsProcessTrusted()
-            print("Current accessibility permissions status: \(accessEnabled ? "Enabled" : "Disabled")")
-        } else {
-            // Normal first run - prompt for permissions if needed
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
-                // This will cause the system to prompt for accessibility permissions
-                let checkOpt = kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString
-                let accessEnabled = AXIsProcessTrustedWithOptions([checkOpt: true] as CFDictionary)
-                
-                if accessEnabled {
-                    print("Accessibility access granted.")
-                } else {
-                    print("WARNING: Accessibility access is required for hotkey and paste functionality.")
-                    print("Please grant access in System Settings > Privacy & Security > Accessibility.")
-                    
-                    // Create a system alert to make it more visible
-                    let alert = NSAlert()
-                    alert.messageText = "Accessibility Permission Required"
-                    alert.informativeText = "This app needs accessibility permissions to detect hotkeys and manipulate text.\n\nPlease go to System Settings > Privacy & Security > Accessibility and add this app to the list."
-                    alert.alertStyle = .warning
-                    alert.addButton(withTitle: "Open Accessibility Settings")
-                    alert.addButton(withTitle: "Later")
-                    
-                    let response = alert.runModal()
-                    if response == .alertFirstButtonReturn {
-                        // Open the accessibility settings
-                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-                            NSWorkspace.shared.open(url)
-                        }
-                    }
-                }
-            }
-        }
+        // Simplified permission check on startup
+        checkInitialPermissions()
         
-        // Try to set up the hotkey monitor anyway, it will start working once permissions are granted
+        // Setup core functionality 
         setupHotkeyMonitor()
-        
-        // Create a status bar menu item for the app
         createStatusItem()
+    }
+    
+    private func checkInitialPermissions() {
+        let accessEnabled = AXIsProcessTrusted()
+        logger.info("Initial Accessibility Check: \(accessEnabled ? "Enabled" : "Disabled")")
+        
+        if !accessEnabled {
+            // Prompt only if permissions are missing on first launch after install
+            // Avoid prompting repeatedly if the user explicitly denied.
+            logger.warning("Accessibility access is required. Please grant in System Settings > Privacy & Security > Accessibility.")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
+                // Try to trigger the system prompt gently if needed.
+                // This doesn't show UI if already granted or denied.
+                _ = AXIsProcessTrustedWithOptions([kAXTrustedCheckOptionPrompt.takeUnretainedValue() as NSString: false] as CFDictionary)
+            }
+        }
     }
     
     func applicationWillTerminate(_ notification: Notification) {
         for monitor in monitor {
             NSEvent.removeMonitor(monitor)
         }
-        print("All event monitors removed.")
+        logger.info("All event monitors removed. Application terminating.")
     }
     
     private func setupHotkeyMonitor() {
-    // Read hotkey configuration from Info.plist
-    let hotkeyConfig = readHotkeyConfiguration()
-    let keyName = hotkeyConfig.keyName
-    let modifierNames = hotkeyConfig.modifierFlagNames.joined(separator: "+")
-    
-    print("Setting up simplified global hotkey monitor for \(modifierNames)+\(keyName)...")
-
-    // Remove any previously added monitors if this function were called again
-    for oldMonitor in monitor {
-        NSEvent.removeMonitor(oldMonitor)
-    }
-    monitor.removeAll()
-
-    let requiredFlags = hotkeyConfig.modifierFlags
-    let keyCode = hotkeyConfig.keyCode
-
-    let globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
-        // Use intersection to ensure ONLY the required flags (and potentially Caps Lock) are present.
-        // Or use contains() if you want to allow other modifiers like Fn. Test which works best for you.
-        // Let's start with contains() as it's more forgiving.
-        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask) // Isolate relevant flags
-
-        // Only print key presses with modifiers for basic monitoring
-        if event.keyCode == keyCode && requiredFlags.contains(where: { flag in flags.contains(flag) }) {
-            print("\(keyName) Key Pressed with modifiers - \(hotkeyConfig.modifierFlags.map { "\($0): \(flags.contains($0))" }.joined(separator: ", "))")
+        // Read hotkey configuration from Info.plist
+        let hotkeyConfig = readHotkeyConfiguration()
+        let keyName = hotkeyConfig.keyName
+        let modifierNames = hotkeyConfig.modifierFlagNames.joined(separator: "+")
+        
+        logger.info("Setting up global hotkey monitor for \(modifierNames)+\(keyName)...")
+        
+        // Remove any previously added monitors if this function were called again
+        for oldMonitor in monitor {
+            NSEvent.removeMonitor(oldMonitor)
         }
-
-        if event.keyCode == keyCode && requiredFlags.allSatisfy({ flags.contains($0) }) {
-             // Optional: Check if ONLY required flags are pressed ( stricter )
-             // if event.keyCode == keyCode && flags == requiredFlags {
-             print("✅ GLOBAL HOTKEY DETECTED: \(modifierNames)+\(keyName)")
-             self?.handleHotkey()
-         }
-    }
-
-    if let globalMonitor = globalMonitor {
-        monitor.append(globalMonitor)
-        print("Successfully added global key down monitor.")
-    } else {
-        print("🚨 ERROR: Failed to add global key down monitor. Accessibility permissions likely missing or inactive.")
-        // Consider showing an alert here or updating the status menu immediately
-        DispatchQueue.main.async {
-             self.showErrorNotification(title: "Hotkey Monitor Failed", message: "Could not set up the global hotkey. Please ensure Accessibility permissions are granted in System Settings and restart the app if necessary.")
-             self.updateAccessibilityStatus() // Update menu item status
+        monitor.removeAll()
+        
+        let requiredFlags = hotkeyConfig.modifierFlags
+        let keyCode = hotkeyConfig.keyCode
+        
+        let globalMonitor = NSEvent.addGlobalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            guard let self = self else { return }
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask) // Isolate relevant flags
+            
+            if event.keyCode == keyCode && requiredFlags.allSatisfy({ flags.contains($0) }) {
+                // Optional: Add stricter check if ONLY required flags should be pressed (ignoring caps lock/fn)
+                // let nonRequiredFlags = flags.subtracting(NSEvent.ModifierFlags(rawValue: NSEvent.ModifierFlags.RawValue(UInt(0xFFFF0000)))) // Remove device-dependent flags like caps lock, fn
+                // if nonRequiredFlags == NSEvent.ModifierFlags(requiredFlags) { ... }
+                
+                self.logger.debug("✅ GLOBAL HOTKEY DETECTED: \(modifierNames)+\(keyName)")
+                self.handleHotkey()
+            }
+        }
+        
+        if let globalMonitor = globalMonitor {
+            monitor.append(globalMonitor)
+            logger.info("Successfully added global key down monitor.")
+        } else {
+            logger.error("🚨 ERROR: Failed to add global key down monitor. Accessibility permissions likely missing or inactive.")
+            DispatchQueue.main.async {
+                self.showErrorNotification(title: "Hotkey Monitor Failed", message: "Could not set up the global hotkey. Please grant Accessibility permissions and restart the agent if needed.")
+            }
         }
     }
-}
     
     // This function has been intentionally removed as part of the simplification process
     // The functionality is now handled by the simplified setupHotkeyMonitor() function
@@ -194,87 +157,147 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             enableLoginItem()
             sender.state = .on
         }
+        
+        // Log status after toggle for debugging
+        if #available(macOS 13.0, *) {
+            // Try with the specific bundle ID from the error message
+            let specificID = "com.mk.ai.WriterAIHotkeyAgent"
+            let loginItem = SMAppService.loginItem(identifier: specificID)
+            let status = loginItem.status
+            logger.debug("[TOGGLE] Status check for \(specificID): \(status.rawValue)")
+            
+            // Also check Info.plist ID
+            let infoID = "com.writer-ai.WriterAIHotkeyAgent"
+            let infoItem = SMAppService.loginItem(identifier: infoID)
+            let infoStatus = infoItem.status
+            logger.debug("[TOGGLE] Status check for \(infoID): \(infoStatus.rawValue)")
+        }
     }
     
     private func enableLoginItem() {
         if #available(macOS 13.0, *) {
-            // Modern method using SMAppService
             do {
-                let loginItem = SMAppService.loginItem(identifier: Bundle.main.bundleIdentifier!)
-                if loginItem.status == .enabled {
-                    print("Login item is already enabled")
-                } else {
-                    try loginItem.register()
-                    print("Successfully registered login item")
-                }
+                // Use the exact bundle ID from the error message
+                let bundleID = "com.mk.ai.WriterAIHotkeyAgent"
+                let service = SMAppService.loginItem(identifier: bundleID)
+                try service.register()
+                logger.info("Successfully registered login item with ID: \(bundleID)")
             } catch {
-                print("Failed to register login item: \(error)")
-                showErrorNotification(title: "Autostart Setup Failed", message: "Could not enable automatic startup: \(error.localizedDescription)")
+                logger.error("Failed to register login item: \(error.localizedDescription)")
+                
+                // Try fallback with the bundle ID from Info.plist
+                do {
+                    let fallbackID = "com.writer-ai.WriterAIHotkeyAgent"
+                    let fallbackService = SMAppService.loginItem(identifier: fallbackID)
+                    try fallbackService.register()
+                    logger.info("Successfully registered login item with fallback ID: \(fallbackID)")
+                } catch {
+                    logger.error("Failed to register login item with fallback ID: \(error.localizedDescription)")
+                    showErrorNotification(title: "Autostart Setup Failed", message: "Could not enable automatic startup: \(error.localizedDescription)")
+                }
             }
         } else {
-            // Fallback for older macOS versions - use AppleScript
-            let script = """
-            tell application "System Events"
-                make login item at end with properties {path:"\(Bundle.main.bundlePath)", hidden:true}
-            end tell
-            """
+            // Fallback for macOS < 13
+            let safePath = Bundle.main.bundlePath.replacingOccurrences(of: "\"", with: "\\\"")
+            let script = "tell application \"System Events\" to make login item at end with properties {path:\"\(safePath)\", hidden:true}"
             var error: NSDictionary?
-            NSAppleScript(source: script)?.executeAndReturnError(&error)
-            
-            if let error = error {
-                print("Failed to enable login item: \(error)")
-                showErrorNotification(title: "Autostart Setup Failed", message: "Could not enable automatic startup")
+            if NSAppleScript(source: script)?.executeAndReturnError(&error) == nil {
+                logger.error("Failed to enable login item (AppleScript): \(error?.description ?? "Unknown error")")
+                showErrorNotification(title: "Autostart Setup Failed", message: "Could not enable automatic startup using AppleScript.")
             } else {
-                print("Successfully enabled login item using AppleScript")
+                logger.info("Successfully enabled login item (AppleScript).")
             }
         }
     }
     
     private func disableLoginItem() {
         if #available(macOS 13.0, *) {
-            // Modern method using SMAppService
+            // Try to unregister with all possible bundle IDs to ensure we catch the right one
+            var success = false
+            
+            // First try the specific ID from the error message
             do {
-                let loginItem = SMAppService.loginItem(identifier: Bundle.main.bundleIdentifier!)
-                try loginItem.unregister()
-                print("Successfully unregistered login item")
+                let specificID = "com.mk.ai.WriterAIHotkeyAgent"
+                let service = SMAppService.loginItem(identifier: specificID)
+                try service.unregister()
+                logger.info("Successfully unregistered login item with ID: \(specificID)")
+                success = true
             } catch {
-                print("Failed to unregister login item: \(error)")
-                showErrorNotification(title: "Autostart Removal Failed", message: "Could not disable automatic startup: \(error.localizedDescription)")
+                logger.debug("Failed to unregister with specific ID: \(error.localizedDescription)")
+            }
+            
+            // Also try with the Info.plist bundle ID
+            do {
+                let infoID = "com.writer-ai.WriterAIHotkeyAgent"
+                let service = SMAppService.loginItem(identifier: infoID)
+                try service.unregister()
+                logger.info("Successfully unregistered login item with Info.plist ID: \(infoID)")
+                success = true
+            } catch {
+                logger.debug("Failed to unregister with Info.plist ID: \(error.localizedDescription)")
+            }
+            
+            // If both failed, show error
+            if !success {
+                logger.error("Failed to unregister login item with any known bundle ID")
+                showErrorNotification(title: "Autostart Removal Failed", message: "Could not disable automatic startup. Please check system settings.")
             }
         } else {
-            // Fallback for older macOS versions - use AppleScript
-            let script = """
-            tell application "System Events"
-                delete (every login item whose path contains "\(Bundle.main.bundlePath)")
-            end tell
-            """
+            // Fallback for macOS < 13
+            // Important: Ensure Bundle.main.bundlePath doesn't contain characters that break AppleScript strings easily
+            let safePath = Bundle.main.bundlePath.replacingOccurrences(of: "\"", with: "\\\"")
+            let script = "tell application \"System Events\" to delete (every login item whose path is \"\(safePath)\")"
             var error: NSDictionary?
-            NSAppleScript(source: script)?.executeAndReturnError(&error)
-            
-            if let error = error {
-                print("Failed to disable login item: \(error)")
-                showErrorNotification(title: "Autostart Removal Failed", message: "Could not disable automatic startup")
+            if NSAppleScript(source: script)?.executeAndReturnError(&error) == nil {
+                logger.error("Failed to disable login item (AppleScript): \(error?.description ?? "Unknown error")")
+                showErrorNotification(title: "Autostart Removal Failed", message: "Could not disable automatic startup using AppleScript.")
             } else {
-                print("Successfully disabled login item using AppleScript")
+                logger.info("Successfully disabled login item (AppleScript).")
             }
         }
     }
     
     private func isLoginItemEnabled() -> Bool {
         if #available(macOS 13.0, *) {
-            // Modern method using SMAppService
-            let loginItem = SMAppService.loginItem(identifier: Bundle.main.bundleIdentifier!)
-            return loginItem.status == .enabled
+            // First check the specific bundle ID from the error message
+            let specificID = "com.mk.ai.WriterAIHotkeyAgent"
+            let loginItem = SMAppService.loginItem(identifier: specificID)
+            
+            // Enhanced logging to help diagnose issues
+            logger.debug("APP PATH: \(Bundle.main.bundlePath)")
+            logger.debug("BUNDLE ID FROM INFO.PLIST: \(Bundle.main.bundleIdentifier ?? "nil")")
+            
+            // Check status of the specific ID
+            let status = loginItem.status
+            let specificEnabled = status == .enabled
+            logger.debug("Login item status for \(specificID): \(status.rawValue) -> Enabled: \(specificEnabled)")
+            
+            // Also check the Info.plist bundle ID
+            let infoID = "com.writer-ai.WriterAIHotkeyAgent"
+            let infoItem = SMAppService.loginItem(identifier: infoID)
+            let infoStatus = infoItem.status
+            let infoEnabled = infoStatus == .enabled
+            logger.debug("Login item status for \(infoID): \(infoStatus.rawValue) -> Enabled: \(infoEnabled)")
+            
+            // Return true if either ID is enabled
+            return specificEnabled || infoEnabled
         } else {
             // For older macOS versions, we can check via AppleScript
+            let safePath = Bundle.main.bundlePath.replacingOccurrences(of: "\"", with: "\\\"")
             let script = """
             tell application "System Events"
-                return exists (every login item whose path contains "\(Bundle.main.bundlePath)")
+                return exists login item whose path is "\(safePath)"
             end tell
             """
             var error: NSDictionary?
             let result = NSAppleScript(source: script)?.executeAndReturnError(&error)
-            return result?.booleanValue ?? false
+            let enabled = result?.booleanValue ?? false
+            
+            logger.debug("Login item status (AppleScript): \(enabled)")
+            if let error = error {
+                logger.error("Error checking login item status (AppleScript): \(error)")
+            }
+            return enabled
         }
     }
     
@@ -283,62 +306,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func createStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         
-        // Set the status item to show "W" as text with custom styling
         if let button = statusItem?.button {
-            // Use a text-based icon (capital W for Writer)
             button.title = "W"
-            
-            // Apply custom font and styling
             button.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
-            
-            // Set accessibility description for the button
-            button.setAccessibilityLabel("WriterAI")
+            button.setAccessibilityLabel("WriterAI Agent") // More specific accessibility label
         }
         
-        // Create the menu
         let menu = NSMenu()
         
-        // Add a status item
-        let statusMenuItem = NSMenuItem(title: "Status: Initializing...", action: nil, keyEquivalent: "")
-        statusMenuItem.isEnabled = false
-        menu.addItem(statusMenuItem)
-        
-        // Add a hotkey info item
+        // 1. Hotkey Display (Non-clickable)
         let hotkeyConfig = readHotkeyConfiguration()
         let hotkeyInfoItem = NSMenuItem(title: "Hotkey: \(hotkeyConfig.displayName)", action: nil, keyEquivalent: "")
-        hotkeyInfoItem.isEnabled = false
+        hotkeyInfoItem.isEnabled = false // Make it non-interactive
         menu.addItem(hotkeyInfoItem)
         
-        // Add an item to check accessibility permissions
-        let checkPermissionItem = NSMenuItem(title: "Check Accessibility Permissions", action: #selector(checkAccessibilityPermissions(_:)), keyEquivalent: "c")
-        checkPermissionItem.target = self
-        menu.addItem(checkPermissionItem)
+        menu.addItem(NSMenuItem.separator())
         
-        // Add an item to open accessibility settings
-        let openSettingsItem = NSMenuItem(title: "Open Accessibility Settings", action: #selector(openAccessibilitySettings(_:)), keyEquivalent: "o")
-        openSettingsItem.target = self
-        menu.addItem(openSettingsItem)
+        // 2. Restart Rust Service (Backend)
+        let restartRustItem = NSMenuItem(title: "Restart Backend Service", action: #selector(restartRustService(_:)), keyEquivalent: "")
+        restartRustItem.target = self
+        // Add tooltip for clarity
+        restartRustItem.toolTip = "Restarts the Rust process handling AI requests."
+        menu.addItem(restartRustItem)
         
-        // Add an item to open automation settings
-        let openAutomationItem = NSMenuItem(title: "Open Automation Settings", action: #selector(openAutomationSettings(_:)), keyEquivalent: "a")
-        openAutomationItem.target = self
-        menu.addItem(openAutomationItem)
+        // 3. Restart Swift Service (Agent)
+        let restartSwiftItem = NSMenuItem(title: "Restart Hotkey Agent", action: #selector(restartApp(_:)), keyEquivalent: "")
+        restartSwiftItem.target = self
+        restartSwiftItem.toolTip = "Restarts this hotkey listener application. Useful after changing permissions."
+        menu.addItem(restartSwiftItem)
         
         menu.addItem(NSMenuItem.separator())
         
-        // Add a hotkey test item
-        let testHotkeyItem = NSMenuItem(title: "Test Hotkey Processing", action: #selector(testHotkey(_:)), keyEquivalent: "t")
-        testHotkeyItem.target = self
-        menu.addItem(testHotkeyItem)
-        
-        // Add a test connection item
-        let testConnectionItem = NSMenuItem(title: "Test Rust Service Connection", action: #selector(testRustConnection(_:)), keyEquivalent: "r")
-        testConnectionItem.target = self
-        menu.addItem(testConnectionItem)
-        
-        menu.addItem(NSMenuItem.separator())
-        
-        // Add a login item toggle
+        // 4. Launch at Login Toggle
         let loginItemEnabled = isLoginItemEnabled()
         let loginItemToggle = NSMenuItem(title: "Launch at Login", action: #selector(toggleLoginItemSetting(_:)), keyEquivalent: "l")
         loginItemToggle.target = self
@@ -347,132 +346,61 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         menu.addItem(NSMenuItem.separator())
         
-        // Add a Restart item
-        let restartItem = NSMenuItem(title: "Restart App", action: #selector(restartApp(_:)), keyEquivalent: "")
-        restartItem.target = self
-        menu.addItem(restartItem)
-        
-        menu.addItem(NSMenuItem.separator())
-        
-        // Add a quit item
-        let quitItem = NSMenuItem(title: "Quit", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        // 5. Quit
+        let quitItem = NSMenuItem(title: "Quit WriterAI Agent", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         menu.addItem(quitItem)
         
         // Set the menu
         statusItem?.menu = menu
+        logger.info("Status menu created with new simplified items.")
+    }
+    
+    @objc private func restartRustService(_ sender: Any?) {
+        logger.info("Attempting to restart Rust service (Label: \(self.rustServiceLabel))...")
+        showNotification(title: "Backend Service", message: "Attempting to restart...")
         
-        // Update the status immediately
-        updateAccessibilityStatus()
-    }
-    
-    @objc private func checkAccessibilityPermissions(_ sender: Any?) {
-        updateAccessibilityStatus()
-    }
-    
-    @objc private func openAccessibilitySettings(_ sender: Any?) {
-        // Try to open the security preferences directly to the accessibility pane
-        if let accessibilityURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-            if NSWorkspace.shared.open(accessibilityURL) {
-                print("Opened System Settings > Privacy & Security > Accessibility")
-            } else {
-                // Fallback to opening Security & Privacy in general
-                if let securityURL = URL(string: "x-apple.systempreferences:com.apple.preference.security") {
-                    NSWorkspace.shared.open(securityURL)
-                    print("Opened System Settings > Privacy & Security")
-                } else {
-                    print("Failed to open System Settings")
+        // Use unload/load commands which are more reliable for complete restarts
+        let unloadCommand = "launchctl unload ~/Library/LaunchAgents/\(self.rustServiceLabel).plist"
+        let loadCommand = "launchctl load -w ~/Library/LaunchAgents/\(self.rustServiceLabel).plist"
+        
+        // Run Unload Command
+        runShellCommand(command: unloadCommand) { [weak self] unloadSuccess, unloadOutput in
+            guard let self = self else { return }
+            
+            if unloadSuccess {
+                self.logger.info("Rust service unloaded successfully.")
+                // Wait a brief moment before loading
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    // Run Load Command
+                    self.runShellCommand(command: loadCommand) { loadSuccess, loadOutput in
+                        if loadSuccess {
+                            self.logger.info("Rust service loaded successfully.")
+                            self.showNotification(title: "Backend Service Restarted", message: "The backend service was restarted successfully.")
+                        } else {
+                            self.logger.error("Failed to load Rust service. Output: \(loadOutput)")
+                            self.showErrorNotification(title: "Backend Restart Failed", message: "Could not start the backend service. Check logs.")
+                        }
+                    }
                 }
-            }
-        } else {
-            print("Failed to create preferences URL")
-        }
-    }
-    
-    @objc private func openAutomationSettings(_ sender: Any?) {
-        // Try to open the security preferences directly to the automation pane
-        if let automationURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
-            if NSWorkspace.shared.open(automationURL) {
-                print("Opened System Settings > Privacy & Security > Automation")
             } else {
-                // Fallback to opening Security & Privacy in general
-                if let securityURL = URL(string: "x-apple.systempreferences:com.apple.preference.security") {
-                    NSWorkspace.shared.open(securityURL)
-                    print("Opened System Settings > Privacy & Security")
-                } else {
-                    print("Failed to open System Settings")
-                }
-            }
-        } else {
-            print("Failed to create preferences URL")
-        }
-    }
-    
-    @objc private func testHotkey(_ sender: Any?) {
-        print("Manual test of hotkey processing triggered")
-        
-        // Start timing for the test
-        let testStartTime = Date()
-        
-        // Use the input dialog for test mode since we're being explicit about testing
-        self.showManualTextEntryDialog(completion: { text in
-            if let text = text, !text.isEmpty {
-                // Get time for dialog input completion
-                let inputDuration = Date().timeIntervalSince(testStartTime)
+                // Log failure to unload, but still attempt to load
+                self.logger.warning("Failed to unload Rust service (maybe not running?). Output: \(unloadOutput). Attempting to load anyway...")
                 
-                // Process the manually entered text with timing information
-                self.processTextWithFallbacks(text, originalTypes: nil, originalContent: nil, 
-                                             timing: (start: testStartTime, copy: inputDuration))
-            }
-        })
-    }
-    
-    @objc private func testRustConnection(_ sender: Any?) {
-        print("Testing connection to Rust service...")
-        
-        // Show a dialog to get test text input
-        self.showManualTextEntryDialog(completion: { text in
-            guard let text = text, !text.isEmpty else { return }
-            
-            print("Testing connection with text: \(text)")
-            
-            // Create a dedicated session with custom configuration
-            let sessionConfig = URLSessionConfiguration.default
-            sessionConfig.timeoutIntervalForRequest = 30.0  // 30 seconds timeout
-            sessionConfig.waitsForConnectivity = true      // Wait for connectivity if not available
-            // Session is used implicitly by sendToRustService
-            
-            // Send text directly to service to test connection
-            self.sendToRustService(text: text) { result in
-                DispatchQueue.main.async {
-                    switch result {
-                    case .success(let response):
-                        print("✅ Connection test successful!")
-                        
-                        // Show success with response preview
-                        let alert = NSAlert()
-                        alert.messageText = "Connection Successful"
-                        alert.informativeText = "Successfully connected to Rust service.\n\nResponse: \(response.prefix(300))\(response.count > 300 ? "..." : "")"
-                        alert.alertStyle = .informational
-                        alert.runModal()
-                        
-                    case .failure(let error):
-                        print("❌ Connection test failed: \(error.localizedDescription)")
-                        
-                        // Show error notification
-                        self.showErrorNotification(title: "Connection Failed", 
-                                                  message: "Could not connect to Rust service: \(error.localizedDescription)")
-                        
-                        // Show alert with helpful info
-                        let alert = NSAlert()
-                        alert.messageText = "Connection to Rust Service Failed"
-                        alert.informativeText = "Could not connect to the Rust service at \(self.rustServiceUrl).\n\nError: \(error.localizedDescription)\n\nPlease ensure the Rust service is running on port 8989."
-                        alert.alertStyle = .warning
-                        alert.runModal()
+                // Run Load Command directly
+                self.runShellCommand(command: loadCommand) { loadSuccess, loadOutput in
+                    if loadSuccess {
+                        self.logger.info("Rust service loaded successfully (after failing to unload).")
+                        self.showNotification(title: "Backend Service Started", message: "The backend service was started (it might not have been running).")
+                    } else {
+                        self.logger.error("Failed to load Rust service after failing to unload. Output: \(loadOutput)")
+                        self.showErrorNotification(title: "Backend Restart Failed", message: "Could not start the backend service after trying to stop it. Check logs.")
                     }
                 }
             }
-        })
+        }
     }
+    
+    // Removed old menu functions that are no longer needed with the simplified menu
     
     // Removed testDirectTextProcessing() since it's now handled by the testRustConnection method
     
@@ -481,150 +409,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     // Removed handleRequestResult since it's now handled directly in the appropriate methods
     
-    private func showSuccessNotification(title: String, message: String) {
+    private func showNotification(title: String, message: String) {
         let content = UNMutableNotificationContent()
         content.title = title
         content.body = message
         content.sound = .default
         
         let request = UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request) { error in
+        UNUserNotificationCenter.current().add(request) { [weak self] error in
             if let error = error {
-                print("Error delivering notification: \(error)")
+                self?.logger.error("Error delivering notification: \(error.localizedDescription)")
             }
         }
     }
     
-    private func updateAccessibilityStatus() {
-        // Use a different API call to check permissions 
-        // First try direct method
-        let accessEnabled = AXIsProcessTrusted()
-        print("DEBUG: AXIsProcessTrusted() returned: \(accessEnabled)")
-        
-        // Check current macOS version for additional context
-        let osVersion = ProcessInfo.processInfo.operatingSystemVersion
-        print("DEBUG: macOS version: \(osVersion.majorVersion).\(osVersion.minorVersion).\(osVersion.patchVersion)")
-        
-        // Check if we're a hardened runtime
-        let hardenedRuntime = Bundle.main.infoDictionary?["com.apple.security.get-task-allow"] != nil
-        print("DEBUG: App using hardened runtime: \(hardenedRuntime)")
-        
-        // Try a simple AppleScript to test if we can actually control the system
-        var canControlSystem = false
-        
-        // Try several different AppleScript tests to pinpoint the issue
-        let testScripts = [
-            "Basic test": "tell application \"System Events\" to return name of first process",
-            "Clipboard test": "set the clipboard to \"test\"",
-            "Key press test": "tell application \"System Events\" to keystroke \"a\"",
-        ]
-        
-        for (testName, scriptSource) in testScripts {
-            print("DEBUG: Running AppleScript test: \(testName)")
-            let appleScript = NSAppleScript(source: scriptSource)
-            var error: NSDictionary?
-            if let scriptResult = appleScript?.executeAndReturnError(&error) {
-                print("DEBUG: AppleScript \(testName) succeeded with result: \(scriptResult.stringValue ?? "no value")")
-                // If any test passes, we have some level of control
-                canControlSystem = true
-            } else if let err = error {
-                print("DEBUG: AppleScript \(testName) failed: \(err)")
-                if let errMsg = err[NSAppleScript.errorMessage] as? String {
-                    print("DEBUG: AppleScript \(testName) error message: \(errMsg)")
-                }
-            }
-        }
-        
-        // Try direct TCC database check (won't work in sandboxed apps)
-        print("DEBUG: Checking app bundle identifier: \(Bundle.main.bundleIdentifier ?? "unknown")")
-        
-        // Update the status menu item
-        if let menu = statusItem?.menu, let statusItem = menu.item(at: 0) {
-            if canControlSystem {
-                statusItem.title = "Status: Accessibility Working ✅"
-            } else if accessEnabled {
-                statusItem.title = "Status: Permission Granted (Restart Required) ⚠️"
-            } else {
-                statusItem.title = "Status: Accessibility Disabled ❌"
-            }
-        }
-        
-        // Also log to console with more context
-        print("Accessibility permissions - API status: \(accessEnabled ? "Enabled" : "Disabled"), Can control system: \(canControlSystem ? "Yes" : "No")")
-        
-        // If accessibility is granted according to API but we can't control the system,
-        // there might be additional permissions needed or a restart required
-        if accessEnabled && !canControlSystem {
-            // Check if Automation permissions are enabled
-            let automationScript = NSAppleScript(source: "tell application \"System Events\" to return name of first process")
-            var automationError: NSDictionary?
-            automationScript?.executeAndReturnError(&automationError)
-            
-            // Check if this is a permission issue or something else
-            let isPermissionIssue = automationError?[NSAppleScript.errorNumber] as? Int == -1743
-            
-            print("⚠️ Permission appears to be granted but not effective. Try restarting the app.")
-            print("DEBUG: Is this an automation permission issue? \(isPermissionIssue)")
-            
-            // Check if we were recently restarted
-            let wasRecentlyRestarted = UserDefaults.standard.bool(forKey: "WasRecentlyRestarted")
-            if wasRecentlyRestarted {
-                // We already tried restarting, so that didn't help
-                print("⚠️ App was already restarted but permissions still not effective.")
-                print("⚠️ Try completely quitting the app, verifying permissions, and starting fresh.")
-                
-                // Only show this once
-                UserDefaults.standard.removeObject(forKey: "WasRecentlyRestarted")
-                
-                // Show alert with more detailed troubleshooting
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    let alert = NSAlert()
-                    alert.messageText = "Permission Issues Persist"
-                    alert.informativeText = "Try these steps:\n\n1. Quit this app completely\n2. Go to System Settings > Privacy & Security > Accessibility\n3. Remove this app from the list\n4. Add it back and ensure the checkbox is enabled\n5. IMPORTANT: Also check System Settings > Privacy & Security > Automation and add this app if not present\n6. Restart your Mac completely\n7. Start the app again"
-                    alert.alertStyle = .warning
-                    alert.addButton(withTitle: "Open Accessibility Settings")
-                    alert.addButton(withTitle: "Open Automation Settings")
-                    alert.addButton(withTitle: "Quit App")
-                    alert.addButton(withTitle: "Continue Anyway")
-                    
-                    let response = alert.runModal()
-                    if response == .alertFirstButtonReturn {
-                        self.openAccessibilitySettings(nil)
-                    } else if response == .alertSecondButtonReturn {
-                        // Open Automation settings
-                        self.openAutomationSettings(nil)
-                    } else if response == .alertThirdButtonReturn {
-                        NSApp.terminate(nil)
-                    }
-                }
-            } else {
-                // First time noticing this issue - suggest restart and check Automation
-                // Show restart recommendation
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                    let alert = NSAlert()
-                    alert.messageText = "App Restart Recommended"
-                    alert.informativeText = "Accessibility permission has been granted, but you also need to grant Automation permission.\n\n1. Open System Settings > Privacy & Security > Automation\n2. Find this app in the list and enable it for \"System Events\"\n3. Restart the app\n\nWould you like to open Automation settings now?"
-                    alert.alertStyle = .informational
-                    alert.addButton(withTitle: "Open Automation Settings")
-                    alert.addButton(withTitle: "Restart App")
-                    alert.addButton(withTitle: "Later")
-                    
-                    let response = alert.runModal()
-                    if response == .alertFirstButtonReturn {
-                        // Open Automation settings
-                        self.openAutomationSettings(nil)
-                    } else if response == .alertSecondButtonReturn {
-                        self.restartApp(nil)
-                    }
-                }
-            }
-        }
-    }
+    // Removed updateAccessibilityStatus method - no longer needed with the simplified menu
     
     @objc private func restartApp(_ sender: Any?) {
-        // Get the path to the current executable
+        logger.info("Restarting Hotkey Agent...")
+        
         guard let executablePath = Bundle.main.executablePath else {
-            print("ERROR: Could not get executable path")
+            logger.error("Could not get executable path to restart.")
+            showErrorNotification(title: "Restart Failed", message: "Could not determine application path.")
             return
         }
         
@@ -632,15 +438,20 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         UserDefaults.standard.set(true, forKey: "WasRecentlyRestarted")
         UserDefaults.standard.synchronize()
         
-        // Launch a new instance first so we don't lose the app
+        // Launch a new instance
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executablePath)
-        try? process.run()
         
-        // Create a small delay to allow the new instance to start before terminating this one
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            // Terminate the current process
-            exit(0)
+        do {
+            try process.run()
+            // Create a small delay to allow the new instance to start before terminating this one
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                exit(0)
+            }
+        } catch {
+            logger.error("Failed to launch new instance during restart: \(error.localizedDescription)")
+            UserDefaults.standard.removeObject(forKey: "WasRecentlyRestarted") // Clear flag on failure
+            showErrorNotification(title: "Restart Failed", message: "Could not launch new application instance.")
         }
     }
     
@@ -712,10 +523,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 
                 print("Selected Text Length: \(selectedText.count)")
                 
-                // Start timing for text processing (including network request)
-                let processStartTime = Date()
-                
-                // 2. Process text directly
+                // 2. Process text directly - timing is handled in processTextWithFallbacks
                 self.processTextWithFallbacks(selectedText, originalTypes: originalTypes, originalContent: originalContent, 
                                               timing: (start: hotkeyStartTime, copy: copyDuration))
             }
@@ -1016,68 +824,62 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func restorePasteboard(originalTypes: [NSPasteboard.PasteboardType]?, originalContent: [String]?) {
         guard let types = originalTypes, let contents = originalContent, 
               types.count == contents.count, !types.isEmpty else { 
-            print("No original clipboard content to restore.")
+            logger.debug("No original clipboard content to restore.")
             return 
         }
         
         NSPasteboard.general.clearContents()
         
+        var restoredTypes: [String] = []
         // Restore each type and content
         for (index, type) in types.enumerated() {
             if NSPasteboard.general.setString(contents[index], forType: type) {
-                print("Restored content for type: \(type)")
+                restoredTypes.append(type.rawValue)
             }
         }
         
-        print("Original clipboard content restored.")
+        if !restoredTypes.isEmpty {
+            logger.debug("Original clipboard content restored for types: \(restoredTypes.joined(separator: ", "))")
+        }
     }
     
     private func runAppleScript(script: String, completion: @escaping (Bool) -> Void) {
-        print("DEBUG: Attempting to run AppleScript: \(script)")
+        logger.debug("Attempting to run AppleScript: \(script.prefix(100))...")
         var error: NSDictionary?
         guard let appleScript = NSAppleScript(source: script) else {
-            print("DEBUG: Failed to initialize NSAppleScript.")
+            logger.error("Failed to initialize NSAppleScript.")
             completion(false)
             return
         }
         
         // Execute AppleScript off the main thread to avoid blocking UI
         DispatchQueue.global(qos: .userInitiated).async {
-            print("DEBUG: Executing AppleScript...")
             let result = appleScript.executeAndReturnError(&error)
             // Return result to main thread for safe completion handling
             DispatchQueue.main.async {
                 if let err = error {
-                    print("DEBUG: AppleScript Error: \(err)")
-                    // Print more detailed error information
+                    self.logger.error("AppleScript Error: \(err)")
+                    // Log more detailed error information
                     if let errCode = err[NSAppleScript.errorNumber] as? NSNumber {
-                        print("DEBUG: AppleScript Error Code: \(errCode)")
+                        self.logger.error("AppleScript Error Code: \(errCode)")
                     }
                     if let errMsg = err[NSAppleScript.errorMessage] as? String {
-                        print("DEBUG: AppleScript Error Message: \(errMsg)")
+                        self.logger.error("AppleScript Error Message: \(errMsg)")
                     }
                     
                     // Check if we got a permissions error
                     let errDesc = (err[NSAppleScript.errorMessage] as? String) ?? ""
                     if errDesc.contains("not authorized") || errDesc.contains("not allowed") || errDesc.contains("permission") {
-                        print("DEBUG: AppleScript permission error - verify accessibility permissions")
+                        self.logger.warning("AppleScript permission error - verify accessibility permissions")
                         
-                        // Show a notification about permissions
-                        let alert = NSAlert()
-                        alert.messageText = "Accessibility Permission Issue"
-                        alert.informativeText = "WriterAI is having trouble controlling your keyboard. Please make sure it's enabled in System Settings > Privacy & Security > Accessibility."
-                        alert.addButton(withTitle: "Open Settings")
-                        alert.addButton(withTitle: "Later")
-                        
-                        let response = alert.runModal()
-                        if response == .alertFirstButtonReturn {
-                            self.openAccessibilitySettings(nil)
-                        }
+                        // Just show error notification instead of opening a settings window
+                        self.showErrorNotification(title: "Permission Issue", 
+                                                message: "WriterAI is having trouble controlling your keyboard. Please enable it in System Settings > Privacy & Security > Accessibility.")
                     }
                     
                     completion(false)
                 } else {
-                    print("DEBUG: AppleScript executed successfully: \(result.stringValue ?? "no return value")")
+                    self.logger.debug("AppleScript executed successfully: \(result.stringValue ?? "no return value")")
                     completion(true)
                 }
             }
@@ -1098,7 +900,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         request.httpBody = jsonData
         
-        print("Sending request to Rust service at \(rustServiceUrl)...")
+        logger.debug("Sending request to Rust service at \(self.rustServiceUrl)...")
         // Create a dedicated session with custom configuration
         let sessionConfig = URLSessionConfiguration.default
         sessionConfig.timeoutIntervalForRequest = 180.0  // 3 minutes timeout, matching Rust service
@@ -1231,7 +1033,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     /// Reads hotkey configuration from Info.plist or returns default values
     private func readHotkeyConfiguration() -> HotkeyConfig {
         // Print the bundle identifier for debugging
-        print("DEBUG: Reading config for bundle: \(Bundle.main.bundleIdentifier ?? "unknown")")
+        logger.debug("Reading config for bundle: com.writer-ai.WriterAIHotkeyAgent")
         
         // Print all keys in the Info.plist
         if let infoPlist = Bundle.main.infoDictionary {
@@ -1331,6 +1133,66 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
     }
     
-    // This function has been intentionally removed as part of the simplification process
-    // We no longer need shell command execution after removing curl fallbacks
+    // MARK: - Shell Command Execution
+    
+    private func runShellCommand(command: String, completion: @escaping (Bool, String) -> Void) {
+        logger.debug("Running shell command: \(command)")
+        let process = Process()
+        let outputPipe = Pipe()
+        let errorPipe = Pipe()
+        
+        process.executableURL = URL(fileURLWithPath: "/bin/sh") // Use shell to interpret command
+        process.arguments = ["-c", command]
+        process.standardOutput = outputPipe
+        process.standardError = errorPipe
+        
+        // Run asynchronously to avoid blocking the main thread
+        DispatchQueue.global(qos: .userInitiated).async {
+            var outputString = ""
+            var errorString = ""
+            let outputHandle = outputPipe.fileHandleForReading
+            let errorHandle = errorPipe.fileHandleForReading
+            
+            // Observers must be set *before* launching
+            outputHandle.readabilityHandler = { handle in
+                if let data = try? handle.readToEnd(), let str = String(data: data, encoding: .utf8) {
+                    outputString += str
+                }
+            }
+            errorHandle.readabilityHandler = { handle in
+                if let data = try? handle.readToEnd(), let str = String(data: data, encoding: .utf8) {
+                    errorString += str
+                }
+            }
+            
+            do {
+                try process.run()
+                process.waitUntilExit() // Wait for the process to complete
+                
+                // Ensure handlers get remaining data
+                try? outputHandle.close()
+                try? errorHandle.close()
+                
+                
+                let status = process.terminationStatus
+                let combinedOutput = (outputString.isEmpty ? "" : "Output:\n\(outputString)") + (errorString.isEmpty ? "" : "\nError Output:\n\(errorString)")
+                
+                DispatchQueue.main.async {
+                    if status == 0 {
+                        self.logger.debug("Shell command finished successfully. \(combinedOutput)")
+                        completion(true, combinedOutput.trimmingCharacters(in: .whitespacesAndNewlines))
+                    } else {
+                        self.logger.error("Shell command failed with status \(status). \(combinedOutput)")
+                        completion(false, combinedOutput.trimmingCharacters(in: .whitespacesAndNewlines))
+                    }
+                }
+            } catch {
+                let errorMessage = "Failed to run shell command '\(command)': \(error.localizedDescription)"
+                self.logger.error("\(errorMessage)")
+                DispatchQueue.main.async {
+                    completion(false, errorMessage)
+                }
+            }
+        }
+    }
 }
