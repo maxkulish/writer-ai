@@ -42,12 +42,10 @@ mod llm_test_data {
     }
 
     // Configuration structure for test parameters
-    #[derive(Debug, Deserialize, Clone)]
+    #[derive(Deserialize)]
     pub struct TestConfig {
         pub sentences: Vec<TestSentence>,
-        pub test_run_id: Option<String>,
-        pub export_formats: Option<Vec<String>>,
-        pub metrics_to_collect: Option<Vec<String>>,
+        // Removed unused fields: test_run_id, export_formats, metrics_to_collect
     }
 
     // Test sentence structure with expected corrections
